@@ -1,68 +1,66 @@
-"""
-PDF → per-question answer image extractor.
-Uses PyMuPDF (fitz) to render each page and divide it into
-equal horizontal strips — one strip per question.
-"""
+import os
 import uuid
+import logging
 from pathlib import Path
-from typing import Optional
+from typing import List, Tuple
 
 import fitz  # PyMuPDF
+from pypdf import PdfReader, PdfWriter
 
-CROPS_DIR = Path("uploads/crops")
-CROPS_DIR.mkdir(parents=True, exist_ok=True)
+logger = logging.getLogger(__name__)
 
+STORAGE_DIR = Path("storage")
 
-def extract_answer_images(
-    pdf_path: str,
-    num_questions: int,
-    dpi: int = 150,
-) -> dict[int, Optional[str]]:
+def split_bulk_pdf(bulk_pdf_path: str, pages_per_student: int, exam_id: int) -> List[str]:
     """
-    Render each page of a PDF and divide horizontally into equal strips,
-    one per question. Returns {question_number: image_path}.
-
-    For a multi-page PDF, questions are spread across pages proportionally.
+    Split a large PDF containing many student papers into individual PDFs.
+    Returns a list of paths to the created individual PDFs.
     """
+    reader = PdfReader(bulk_pdf_path)
+    total_pages = len(reader.pages)
+    
+    output_paths = []
+    exam_storage = STORAGE_DIR / "exams" / str(exam_id) / "submissions"
+    exam_storage.mkdir(parents=True, exist_ok=True)
+    
+    for i in range(0, total_pages, pages_per_student):
+        writer = PdfWriter()
+        # Handle cases where the last student might have fewer pages (or trailing pages)
+        end_page = min(i + pages_per_student, total_pages)
+        
+        for page_num in range(i, end_page):
+            writer.add_page(reader.pages[page_num])
+        
+        student_pdf_name = f"submission_{i // pages_per_student + 1}_{uuid.uuid4().hex[:8]}.pdf"
+        output_path = exam_storage / student_pdf_name
+        
+        with open(output_path, "wb") as f:
+            writer.write(f)
+        
+        output_paths.append(str(output_path))
+        
+    return output_paths
+
+def rasterize_pdf_to_pngs(pdf_path: str, output_dir: str, dpi: int = 200) -> List[str]:
+    """
+    Render each page of a PDF to a PNG image.
+    Used for both extraction and display in the review dashboard.
+    """
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    
     doc = fitz.open(pdf_path)
-    total_pages = len(doc)
-
-    # Distribute questions across pages
-    qs_per_page = max(1, num_questions // total_pages)
-    remainder = num_questions % total_pages
-
-    result: dict[int, Optional[str]] = {}
-    q_idx = 1
-    scale = dpi / 72  # points → pixels
-
-    for page_num in range(total_pages):
-        if q_idx > num_questions:
-            break
-
-        page = doc[page_num]
-        pw = page.rect.width   # points
-        ph = page.rect.height  # points
-
-        # How many questions land on this page?
-        qs_on_this_page = qs_per_page + (1 if page_num < remainder else 0)
-        strip_h = ph / qs_on_this_page  # height per strip in points
-
-        for i in range(qs_on_this_page):
-            if q_idx > num_questions:
-                break
-
-            y0 = i * strip_h
-            y1 = (i + 1) * strip_h if i < qs_on_this_page - 1 else ph
-
-            # Render only this strip using a clip rect
-            clip = fitz.Rect(0, y0, pw, y1)
-            mat = fitz.Matrix(scale, scale)
-            pix = page.get_pixmap(matrix=mat, clip=clip)
-
-            out_path = CROPS_DIR / f"{uuid.uuid4()}.png"
-            pix.save(str(out_path))
-            result[q_idx] = str(out_path)
-            q_idx += 1
-
+    image_paths = []
+    
+    for i in range(len(doc)):
+        page = doc[i]
+        # 200 DPI is the sweet spot for Gemini vision and readability
+        pix = page.get_pixmap(dpi=dpi)
+        
+        img_name = f"page_{i + 1}.png"
+        img_path = out_path / img_name
+        pix.save(str(img_path))
+        image_paths.append(str(img_path))
+        
     doc.close()
-    return result
+    return image_paths

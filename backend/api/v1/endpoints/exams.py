@@ -1,276 +1,372 @@
-import os
-import uuid
-import asyncio
+import json
+import logging
+import shutil
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from sqlalchemy.orm import Session
 
 from backend.db.session import get_db
-from backend import models
-from backend.db.schemas import ExamCreate, ExamOut, ExamSummary, QuestionPaperUploadOut
-from backend.core.security import get_current_user, require_role
+from backend.db import models
+from backend.db.schemas import ExamOut, AnswerOut
+from backend.core.security import require_role
+from backend.services.rubric_service import validate_rubric
+from backend.services.pdf_processor import split_bulk_pdf, rasterize_pdf_to_pngs
 
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["exams"])
 
-router = APIRouter(prefix="/api/exams", tags=["exams"])
+STORAGE_DIR = Path("storage")
 
-
-@router.post("", response_model=ExamOut, status_code=201)
-async def create_exam(
+@router.post("/upload", response_model=ExamOut, status_code=status.HTTP_201_CREATED)
+async def upload_exam_package(
+    background_tasks: BackgroundTasks,
     title: str = Form(...),
-    course: str = Form(...),
-    student_id: str = Form(...),
-    student_name: Optional[str] = Form(None),
-    pdf: UploadFile = File(...),
+    rubric_json: str = Form(...),
+    pages_per_student: int = Form(...),
+    bulk_pdf: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("instructor")),
 ):
-    """Upload a single student exam PDF and register it under an exam."""
-    # Create exam if it doesn't exist (simple: one exam per upload batch)
-    exam = models.Exam(title=title, course=course, owner_id=current_user.id)
-    db.add(exam)
-    db.flush()
+    # 1. Validate Rubric
+    try:
+        rubric_data = json.loads(rubric_json)
+    except json.JSONDecodeError:
+        raise HTTPException(400, detail="Invalid JSON format for rubric")
+    
+    is_valid, error_msg = validate_rubric(rubric_data)
+    if not is_valid:
+        raise HTTPException(400, detail=f"Rubric validation failed: {error_msg}")
 
-    # Save PDF
-    safe_name = f"{uuid.uuid4()}.pdf"
-    pdf_path = UPLOAD_DIR / str(exam.id) / safe_name
-    pdf_path.parent.mkdir(parents=True, exist_ok=True)
-    content = await pdf.read()
-    pdf_path.write_bytes(content)
-
-    paper = models.StudentPaper(
-        exam_id=exam.id,
-        student_id=student_id,
-        student_name=student_name,
-        pdf_path=str(pdf_path),
+    # 2. Create Exam
+    exam = models.User(id=current_user.id) # Dummy to check relation, wait
+    exam = models.Exam(
+        title=title,
+        owner_id=current_user.id,
+        rubric_json=rubric_data,
+        status="processing"
     )
-    db.add(paper)
-    db.commit()
-    db.refresh(exam)
-    return exam
-
-
-@router.post("/batch", response_model=ExamOut, status_code=201)
-async def create_exam_batch(
-    title: str = Form(...),
-    course: str = Form(...),
-    pdfs: list[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_role("instructor")),
-):
-    """Upload multiple student exam PDFs for one exam in a single request."""
-    exam = models.Exam(title=title, course=course, owner_id=current_user.id)
     db.add(exam)
-    db.flush()
+    db.flush() # Get exam.id
 
-    for i, pdf in enumerate(pdfs):
-        safe_name = f"{uuid.uuid4()}.pdf"
-        pdf_path = UPLOAD_DIR / str(exam.id) / safe_name
-        pdf_path.parent.mkdir(parents=True, exist_ok=True)
-        content = await pdf.read()
-        pdf_path.write_bytes(content)
-
-        # Derive student_id from filename stem
-        stem = Path(pdf.filename or f"student_{i+1}").stem
-        paper = models.StudentPaper(
+    # 3. Create Questions from Rubric
+    for q_meta in rubric_data["questions"]:
+        question = models.Question(
             exam_id=exam.id,
-            student_id=stem,
-            student_name=None,
-            pdf_path=str(pdf_path),
+            number=q_meta["number"],
+            max_marks=q_meta["max_marks"]
         )
-        db.add(paper)
-
+        db.add(question)
+    
+    # 4. Save Bulk PDF
+    exam_dir = STORAGE_DIR / "exams" / str(exam.id)
+    exam_dir.mkdir(parents=True, exist_ok=True)
+    bulk_path = exam_dir / "bulk_upload.pdf"
+    
+    with open(bulk_path, "wb") as f:
+        shutil.copyfileobj(bulk_pdf.file, f)
+    
     db.commit()
     db.refresh(exam)
+
+    # 5. Run Background Processing (Split & Rasterize)
+    background_tasks.add_task(
+        _process_bulk_upload,
+        exam.id,
+        str(bulk_path),
+        pages_per_student
+    )
+
     return exam
 
-
-@router.get("", response_model=list[ExamSummary])
+@router.get("", response_model=List[ExamOut])
 def list_exams(
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_role("instructor", "ta")),
 ):
     if current_user.role == "instructor":
-        exams = db.query(models.Exam).filter(models.Exam.owner_id == current_user.id).all()
-    else:
-        exams = db.query(models.Exam).all()
-
-    result = []
-    for exam in exams:
-        paper_count = len(exam.papers)
-        graded_count = sum(1 for p in exam.papers if p.status == "graded")
-        result.append(ExamSummary(
-            id=exam.id,
-            title=exam.title,
-            course=exam.course,
-            status=exam.status,
-            created_at=exam.created_at,
-            paper_count=paper_count,
-            graded_count=graded_count,
-        ))
-    return result
-
+        return db.query(models.Exam).filter(models.Exam.owner_id == current_user.id).all()
+    return db.query(models.Exam).all()
 
 @router.get("/{exam_id}", response_model=ExamOut)
 def get_exam(
     exam_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_role("instructor", "ta")),
 ):
     exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
     if not exam:
-        raise HTTPException(status_code=404, detail="Exam not found")
+        raise HTTPException(404, detail="Exam not found")
     return exam
 
 
-@router.delete("/{exam_id}", status_code=204)
-def delete_exam(
+@router.get("/{exam_id}/answers", response_model=List[AnswerOut])
+def list_exam_answers(
     exam_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_role("instructor")),
+    current_user: models.User = Depends(require_role("instructor", "ta")),
 ):
-    exam = db.query(models.Exam).filter(models.Exam.id == exam_id, models.Exam.owner_id == current_user.id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="Exam not found")
-    db.delete(exam)
-    db.commit()
+    # Join with Submission to filter by exam_id
+    answers = db.query(models.Answer).join(models.Submission).filter(
+        models.Submission.exam_id == exam_id
+    ).all()
+    return answers
 
 
-@router.post("/{exam_id}/question-paper", response_model=QuestionPaperUploadOut, status_code=202)
-async def upload_question_paper(
+@router.post("/{exam_id}/extract", status_code=status.HTTP_202_ACCEPTED)
+def trigger_extraction(
     exam_id: int,
     background_tasks: BackgroundTasks,
-    qp_pdf: UploadFile = File(..., description="Question paper PDF"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("instructor")),
 ):
-    """
-    Upload the question paper PDF for an exam.
-    GradeOps will automatically:
-    - Extract all questions and their marks
-    - Generate a rubric scaffold for each question
-    - Pre-populate the rubric editor in the UI
-    """
-    exam = db.query(models.Exam).filter(
-        models.Exam.id == exam_id,
-        models.Exam.owner_id == current_user.id,
-    ).first()
-    if not exam:
-        raise HTTPException(404, "Exam not found")
-
-    # Save the question paper PDF
-    qp_dir = UPLOAD_DIR / str(exam_id) / "question_paper"
-    qp_dir.mkdir(parents=True, exist_ok=True)
-    qp_path = qp_dir / "question_paper.pdf"
-    content = await qp_pdf.read()
-    qp_path.write_bytes(content)
-
-    exam.question_paper_path = str(qp_path)
-    exam.qp_extracted = False
-    db.commit()
-
-    # Run extraction synchronously (returns quickly for small QPs,
-    # runs in thread for larger ones via background_tasks)
-    background_tasks.add_task(_run_qp_extraction, exam_id, str(qp_path))
-
-    return QuestionPaperUploadOut(
-        exam_id=exam_id,
-        question_paper_path=str(qp_path),
-        extracted_questions=[],   # populated once background task finishes
-        message="Question paper uploaded. Extraction running in background — poll GET /api/exams/{id} to see results.",
-    )
-
-
-@router.get("/{exam_id}/question-paper/status")
-def qp_extraction_status(
-    exam_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
-):
-    """Poll this endpoint to check if QP extraction has completed."""
     exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
     if not exam:
         raise HTTPException(404, "Exam not found")
-    questions = [
-        {
-            "number": q.number,
-            "prompt": q.prompt,
-            "given_data": q.given_data,
-            "max_points": q.max_points,
-            "rubric_items": [
-                {"description": ri.description, "points": ri.points, "keywords": ri.keywords or []}
-                for ri in q.rubric_items
-            ],
-        }
-        for q in sorted(exam.questions, key=lambda x: x.number)
-    ]
+    
+    exam.status = "extracting"
+    db.commit()
+    
+    background_tasks.add_task(_run_vlm_extraction, exam_id)
+    return {"message": "VLM extraction started"}
+
+
+@router.get("/{exam_id}/extraction-status")
+def get_extraction_status(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("instructor", "ta")),
+):
+    exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(404, "Exam not found")
+    
+    total = db.query(models.Answer).join(models.Submission).filter(models.Submission.exam_id == exam_id).count()
+    completed = db.query(models.Answer).join(models.Submission).filter(
+        models.Submission.exam_id == exam_id,
+        models.Answer.extraction_status == "completed"
+    ).count()
+    
     return {
-        "qp_extracted": exam.qp_extracted,
-        "question_paper_path": exam.question_paper_path,
-        "questions": questions,
+        "status": exam.status,
+        "total_answers": total,
+        "completed_answers": completed,
+        "percent": round((completed / total) * 100) if total > 0 else 0
     }
 
 
-# ── Background QP extraction task ─────────────────────────────────────────────
+@router.post("/{exam_id}/grade", status_code=status.HTTP_202_ACCEPTED)
+def trigger_grading(
+    exam_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("instructor")),
+):
+    exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(404, "Exam not found")
+    
+    exam.status = "grading"
+    db.commit()
+    
+    background_tasks.add_task(_run_grading_agent, exam_id)
+    return {"message": "Grading pipeline started"}
 
-def _run_qp_extraction(exam_id: int, qp_path: str) -> None:
-    """Background task: extract questions from QP PDF and upsert into DB."""
-    import traceback
-    import logging
+
+@router.get("/{exam_id}/analytics")
+def get_exam_analytics(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("instructor")),
+):
+    exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(404, "Exam not found")
+    
+    # Get all final scores
+    grades = db.query(models.Grade).join(models.Answer).join(models.Submission).filter(
+        models.Submission.exam_id == exam_id
+    ).all()
+    
+    scores = [g.final_score for g in grades if g.final_score is not None]
+    
+    avg_score = sum(scores) / len(scores) if scores else 0
+    
+    # Simple histogram
+    distribution = {}
+    for s in scores:
+        bucket = int(s)
+        distribution[bucket] = distribution.get(bucket, 0) + 1
+
+    # Time savings estimate (heuristic)
+    # Manual: 4 mins per answer
+    # AI: ~1 min per answer (review time)
+    time_saved_hours = (len(scores) * 3) / 60
+    
+    return {
+        "average_score": round(avg_score, 2),
+        "total_graded": len(scores),
+        "distribution": distribution,
+        "time_saved_hours": round(time_saved_hours, 1)
+    }
+def review_answer(
+    answer_id: int,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("ta", "instructor")),
+):
+    ans = db.query(models.Answer).filter(models.Answer.id == answer_id).first()
+    if not ans:
+        raise HTTPException(404, "Answer not found")
+    
+    grade = ans.grade
+    if not grade:
+        grade = models.Grade(answer_id=answer_id)
+        db.add(grade)
+    
+    grade.final_score = payload.get("final_score")
+    grade.ta_notes = payload.get("ta_notes")
+    grade.status = payload.get("status", "reviewed")
+    grade.ta_id = current_user.id
+    grade.reviewed_at = datetime.now()
+    
+    db.commit()
+    db.refresh(ans)
+    return ans
+
+
+# ── Background Processors ─────────────────────────────────────────────────────
+
+def _run_grading_agent(exam_id: int):
+    """Run the GradingAgent for all completed extractions."""
     from backend.db.session import SessionLocal
-    from backend.services.question_extractor import extract_questions_from_paper
-
-    log = logging.getLogger(__name__)
+    from backend.services.grading_agent import GradingAgent
     db = SessionLocal()
     try:
-        log.info("[QP] Starting extraction for exam %d", exam_id)
-        extracted = extract_questions_from_paper(qp_path)
+        answers = db.query(models.Answer).join(models.Submission).filter(
+            models.Submission.exam_id == exam_id,
+            models.Answer.extraction_status == "completed"
+        ).all()
 
+        agent = GradingAgent(db)
+        logger.info(f"Starting Grading Agent for {len(answers)} answers in Exam {exam_id}")
+
+        for ans in answers:
+            agent.run_pipeline(ans.id)
+            logger.info(f"Answer {ans.id} graded.")
+
+        # Run Plagiarism Check
+        from backend.services.plagiarism import run_plagiarism_check
+        run_plagiarism_check(db, exam_id)
+
+        exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
+        if exam:
+            exam.status = "complete"
+            db.commit()
+
+    except Exception as e:
+        logger.error(f"Grading agent failed: {e}")
+    finally:
+        db.close()
+
+def _run_vlm_extraction(exam_id: int):
+    """Iterate through all pending answers and run Gemini VLM extraction."""
+    from backend.db.session import SessionLocal
+    from backend.services.gemini_service import gemini
+    db = SessionLocal()
+    try:
+        answers = db.query(models.Answer).join(models.Submission).filter(
+            models.Submission.exam_id == exam_id,
+            models.Answer.extraction_status == "pending"
+        ).all()
+
+        logger.info(f"Starting VLM extraction for {len(answers)} answers in Exam {exam_id}")
+
+        for ans in answers:
+            # Get question context from rubric
+            exam = ans.submission.exam
+            rubric = exam.rubric_json or {}
+            q_meta = next((q for q in rubric.get("questions", []) if q["number"] == ans.question.number), {})
+            question_text = q_meta.get("answer_key", "General exam answer") # Or combine with criteria
+
+            # Run Gemini
+            result = gemini.extract_answer(ans.crop_path, question_text)
+            
+            ans.transcribed_text = result["transcription"]
+            ans.ocr_confidence = 0.9 if result["legibility"] == "high" else 0.6
+            ans.extraction_status = "completed"
+            db.commit()
+            logger.info(f"Answer {ans.id} extracted.")
+
+        exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
+        if exam:
+            exam.status = "ready_for_grading"
+            db.commit()
+
+    except Exception as e:
+        logger.error(f"VLM extraction failed: {e}")
+    finally:
+        db.close()
+
+
+def _process_bulk_upload(exam_id: int, bulk_path: str, pages_per_student: int):
+    """Split bulk PDF, create submissions/students, and rasterize pages."""
+    from backend.db.session import SessionLocal
+    db = SessionLocal()
+    try:
         exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
         if not exam:
             return
 
-        for q_data in extracted:
-            # Upsert question by number
-            question = db.query(models.Question).filter(
-                models.Question.exam_id == exam_id,
-                models.Question.number == q_data["number"],
-            ).first()
+        # 1. Split PDF
+        pdf_paths = split_bulk_pdf(bulk_path, pages_per_student, exam_id)
+        logger.info(f"Split bulk PDF into {len(pdf_paths)} submissions")
 
-            if question is None:
-                question = models.Question(
-                    exam_id=exam_id,
-                    number=q_data["number"],
+        questions = db.query(models.Question).filter(models.Question.exam_id == exam_id).order_by(models.Question.number).all()
+
+        for i, pdf_path in enumerate(pdf_paths):
+            # 2. Create Student (Dummy roll no for now)
+            roll_no = f"S-{1000 + i}"
+            student = models.Student(exam_id=exam_id, roll_no=roll_no, name=f"Student {i+1}")
+            db.add(student)
+            db.flush()
+
+            # 3. Create Submission
+            submission = models.Submission(
+                exam_id=exam_id,
+                student_id=student.id,
+                pdf_path=pdf_path,
+                num_pages=pages_per_student
+            )
+            db.add(submission)
+            db.flush()
+
+            # 4. Rasterize to PNGs
+            sub_image_dir = STORAGE_DIR / "exams" / str(exam_id) / "submissions" / str(submission.id) / "pages"
+            image_paths = rasterize_pdf_to_pngs(pdf_path, str(sub_image_dir))
+
+            # 5. Create Answers (One question per page assumption)
+            for j, q in enumerate(questions):
+                # If we have more questions than pages, some won't have images
+                # If we have more pages than questions, extra pages are ignored for now
+                img_path = image_paths[j] if j < len(image_paths) else None
+                
+                answer = models.Answer(
+                    submission_id=submission.id,
+                    question_id=q.id,
+                    crop_path=img_path,
+                    extraction_status="pending"
                 )
-                db.add(question)
-                db.flush()
+                db.add(answer)
 
-            question.prompt = q_data["prompt"]
-            question.given_data = q_data.get("given_data")
-            question.max_points = q_data["max_points"]
-
-            # Replace existing rubric items with AI-generated ones
-            db.query(models.RubricItem).filter(
-                models.RubricItem.question_id == question.id
-            ).delete()
-
-            for ri in q_data.get("rubric_items", []):
-                db.add(models.RubricItem(
-                    question_id=question.id,
-                    description=ri["description"],
-                    points=ri["points"],
-                    keywords=ri.get("keywords", []),
-                ))
-
-        exam.qp_extracted = True
+        exam.status = "ready" # Ready for VLM extraction pass
         db.commit()
-        log.info("[QP] Extraction complete for exam %d — %d questions", exam_id, len(extracted))
+        logger.info(f"Processing complete for Exam {exam_id}")
 
-    except Exception:
-        log.error("[QP] Extraction failed for exam %d:\n%s", exam_id, traceback.format_exc())
+    except Exception as e:
+        logger.error(f"Error processing bulk upload: {e}")
         db.rollback()
     finally:
         db.close()

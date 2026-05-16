@@ -3,9 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { Spinner } from '../ui';
 
 export default function Login() {
-  const { login, register } = useAuth();
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', role: 'ta' });
+  const { login } = useAuth();
+  const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -15,12 +14,7 @@ export default function Login() {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      if (mode === 'login') {
-        await login(form.email, form.password);
-      } else {
-        await register({ email: form.email, password: form.password, full_name: form.full_name, role: form.role });
-        await login(form.email, form.password);
-      }
+      await login(form.email, form.password);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -28,12 +22,15 @@ export default function Login() {
     }
   };
 
+  const quickLogin = (email, pass) => {
+    setForm({ email, password: pass });
+  };
+
   return (
     <div className="min-h-screen flex bg-[#0a0a0f] font-sans selection:bg-accent-glow">
       
       {/* LEFT PANE - MARKETING / BRANDING */}
       <div className="hidden lg:flex w-1/2 bg-[#111118] border-r border-[#2a2a3a] flex-col justify-between p-12 relative overflow-hidden">
-        {/* Animated Background Gradients */}
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
           <div className="absolute -top-[20%] -left-[10%] w-[70%] h-[70%] rounded-full bg-accent/10 blur-[120px] mix-blend-screen" />
           <div className="absolute top-[40%] -right-[20%] w-[60%] h-[60%] rounded-full bg-[#22c55e]/5 blur-[120px] mix-blend-screen" />
@@ -59,7 +56,7 @@ export default function Login() {
               <div className="w-8 h-8 rounded bg-[#1a1a25] border border-[#2a2a3a] flex items-center justify-center text-accent shrink-0 mt-1">🤖</div>
               <div>
                 <h3 className="text-white font-semibold mb-1">AI-Powered Grading Pipeline</h3>
-                <p className="text-[#5a5a78] text-sm leading-relaxed">Automate OCR and apply intelligent partial credit using state-of-the-art vision models.</p>
+                <p className="text-[#5a5a78] text-sm leading-relaxed">Automate evaluation using Gemini 2.5 Flash Vision models directly on scanned images.</p>
               </div>
             </div>
             <div className="flex gap-4 items-start">
@@ -69,66 +66,24 @@ export default function Login() {
                 <p className="text-[#5a5a78] text-sm leading-relaxed">Keyboard-first TA dashboard for high-speed overrides, approvals, and confidence checks.</p>
               </div>
             </div>
-            <div className="flex gap-4 items-start">
-              <div className="w-8 h-8 rounded bg-[#1a1a25] border border-[#2a2a3a] flex items-center justify-center text-accent shrink-0 mt-1">📊</div>
-              <div>
-                <h3 className="text-white font-semibold mb-1">Analytics & Plagiarism Ops</h3>
-                <p className="text-[#5a5a78] text-sm leading-relaxed">Dense operational dashboards to track queue progress and flag high-similarity submissions.</p>
-              </div>
-            </div>
           </div>
         </div>
 
         <div className="relative z-10 flex items-center justify-between text-xs text-[#5a5a78] font-mono">
           <span>© 2026 GradeOps Infrastructure</span>
-          <span>v2.0.0-enterprise</span>
+          <span>v2.0.0-hackathon</span>
         </div>
       </div>
 
       {/* RIGHT PANE - AUTH FORM */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 relative">
-        {/* Mobile Logo */}
-        <div className="absolute top-8 left-8 lg:hidden flex items-center gap-2">
-          <div className="w-8 h-8 bg-accent rounded-md flex items-center justify-center text-white font-bold">G</div>
-          <span className="text-white font-bold text-xl tracking-tight">GradeOps</span>
-        </div>
-
         <div className="w-full max-w-md">
           <div className="mb-10 text-center lg:text-left">
-            <h2 className="text-3xl font-bold text-white tracking-tight mb-2">
-              {mode === 'login' ? 'Welcome back' : 'Create an account'}
-            </h2>
-            <p className="text-[#9898b8]">
-              {mode === 'login' ? 'Enter your credentials to access your dashboard.' : 'Join the operational evaluation platform.'}
-            </p>
-          </div>
-
-          <div className="flex bg-[#111118] border border-[#2a2a3a] rounded-lg p-1 mb-8">
-            <button 
-              className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${mode === 'login' ? 'bg-[#2a2a3a] text-white shadow-sm' : 'text-[#5a5a78] hover:text-white'}`} 
-              onClick={() => { setMode('login'); setError(''); }}
-            >
-              Sign In
-            </button>
-            <button 
-              className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${mode === 'register' ? 'bg-[#2a2a3a] text-white shadow-sm' : 'text-[#5a5a78] hover:text-white'}`} 
-              onClick={() => { setMode('register'); setError(''); }}
-            >
-              Register
-            </button>
+            <h2 className="text-3xl font-bold text-white tracking-tight mb-2">Welcome back</h2>
+            <p className="text-[#9898b8]">Enter your institutional credentials to access your dashboard.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-            {mode === 'register' && (
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-[#9898b8] mb-2 font-semibold">Full Name</label>
-                <input 
-                  className="w-full bg-[#111118] border border-[#2a2a3a] rounded-md px-4 py-3 text-white text-sm focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all placeholder-[#5a5a78]" 
-                  type="text" placeholder="Dr. Jane Smith" value={form.full_name} onChange={set('full_name')} required 
-                />
-              </div>
-            )}
-
             <div>
               <label className="block text-xs uppercase tracking-wider text-[#9898b8] mb-2 font-semibold">Institutional Email</label>
               <input 
@@ -145,19 +100,6 @@ export default function Login() {
               />
             </div>
 
-            {mode === 'register' && (
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-[#9898b8] mb-2 font-semibold">System Role</label>
-                <select 
-                  className="w-full bg-[#111118] border border-[#2a2a3a] rounded-md px-4 py-3 text-white text-sm focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all appearance-none cursor-pointer" 
-                  value={form.role} onChange={set('role')}
-                >
-                  <option value="ta">Teaching Assistant (Reviewer)</option>
-                  <option value="instructor">Instructor (Admin)</option>
-                </select>
-              </div>
-            )}
-
             {error && (
               <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-500 text-sm rounded-md font-mono flex items-start gap-2">
                 <span className="text-red-500 mt-0.5">🚨</span> {error}
@@ -169,15 +111,36 @@ export default function Login() {
               className="mt-4 w-full bg-white text-black font-semibold py-3 rounded-md hover:bg-gray-200 transition-all shadow-[0_0_20px_rgba(255,255,255,0.1)] flex justify-center items-center h-[48px]" 
               disabled={loading}
             >
-              {loading ? <Spinner /> : (mode === 'login' ? 'Authenticate' : 'Provision Account')}
+              {loading ? <Spinner /> : 'Authenticate'}
             </button>
           </form>
 
-          {mode === 'login' && (
-            <div className="mt-8 text-center text-sm text-[#5a5a78]">
-              <a href="#" className="hover:text-white transition-colors underline underline-offset-4 decoration-[#2a2a3a]">Forgot your password?</a>
+          {/* QUICK ACCESS PANEL FOR DEMO */}
+          <div className="mt-12 p-6 bg-[#111118] border border-[#2a2a3a] rounded-xl">
+            <h4 className="text-xs uppercase tracking-widest text-accent font-mono mb-4">Quick Access (Demo Seed)</h4>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => quickLogin('admin@gradeops.com', 'admin123')}
+                className="flex items-center justify-between p-3 bg-[#1a1a25] border border-[#2a2a3a] rounded-lg hover:border-accent transition-all group"
+              >
+                <div className="text-left">
+                  <div className="text-sm font-medium text-white">Instructor Access</div>
+                  <div className="text-[10px] text-[#5a5a78] font-mono mt-0.5">admin@gradeops.com / admin123</div>
+                </div>
+                <span className="text-lg opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              </button>
+              <button 
+                onClick={() => quickLogin('ta@gradeops.com', 'ta123')}
+                className="flex items-center justify-between p-3 bg-[#1a1a25] border border-[#2a2a3a] rounded-lg hover:border-accent transition-all group"
+              >
+                <div className="text-left">
+                  <div className="text-sm font-medium text-white">TA Reviewer Access</div>
+                  <div className="text-[10px] text-[#5a5a78] font-mono mt-0.5">ta@gradeops.com / ta123</div>
+                </div>
+                <span className="text-lg opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

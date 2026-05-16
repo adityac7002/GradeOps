@@ -1,4 +1,5 @@
 import os
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -10,56 +11,77 @@ from fastapi.responses import FileResponse
 
 load_dotenv()
 
-from backend.db.session import engine, Base
-from backend.api.v1.endpoints import auth, exams, rubrics, grading, plagiarism
+from backend.db.session import engine, Base, SessionLocal
+from backend.db import models
+from backend.core.security import hash_password
+from backend.api.v1.api import api_router
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 FRONTEND_BUILD = Path("frontend/dist")
-
+STORAGE_DIR = Path("storage")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all DB tables on startup
+    # 1. Create tables
     Base.metadata.create_all(bind=engine)
-    # Ensure upload dirs exist
-    Path("uploads").mkdir(exist_ok=True)
-    Path("uploads/crops").mkdir(exist_ok=True)
+    
+    # 2. Ensure storage dirs exist
+    STORAGE_DIR.mkdir(exist_ok=True)
+    (STORAGE_DIR / "exams").mkdir(exist_ok=True)
+    
+    # 3. Seed users for Day 1
+    db = SessionLocal()
+    try:
+        if not db.query(models.User).filter(models.User.email == "admin@gradeops.com").first():
+            logger.info("Seeding admin (instructor) user...")
+            admin = models.User(
+                email="admin@gradeops.com",
+                password_hash=hash_password("admin123"),
+                role="instructor"
+            )
+            db.add(admin)
+        
+        if not db.query(models.User).filter(models.User.email == "ta@gradeops.com").first():
+            logger.info("Seeding TA user...")
+            ta = models.User(
+                email="ta@gradeops.com",
+                password_hash=hash_password("ta123"),
+                role="ta"
+            )
+            db.add(ta)
+        
+        db.commit()
+    finally:
+        db.close()
+        
     yield
 
-
 app = FastAPI(
-    title="GradeOps API",
-    description="Human-in-the-Loop AI exam grading platform",
-    version="1.0.0",
+    title="GradeOps — AI Grading Platform",
+    description="Enterprise-grade AI-assisted handwritten exam evaluation",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
-# CORS — allow the Vite dev server and same-origin requests
+# CORS config as per Day 1 requirements
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev
-        "http://localhost:8000",  # FastAPI self
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── API routers ────────────────────────────────────────────────────────────────
-app.include_router(auth.router)
-app.include_router(exams.router)
-app.include_router(rubrics.router)
-app.include_router(grading.router)
-app.include_router(plagiarism.router)
+# Include v1 API
+app.include_router(api_router, prefix="/api")
 
+# Serve storage files (answer crops, etc)
+app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
-# ── Serve uploaded images ──────────────────────────────────────────────────────
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-
-
-# ── Serve React frontend (production build) ────────────────────────────────────
+# Serve React frontend
 if FRONTEND_BUILD.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_BUILD / "assets"), name="assets")
 
@@ -73,5 +95,5 @@ else:
         return {
             "message": "GradeOps API is online!",
             "docs": "/docs",
-            "note": "Frontend not built yet — run: cd frontend && npm run build",
+            "status": "Day 1 Skeleton Active"
         }

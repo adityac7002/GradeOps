@@ -1,383 +1,245 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useAuth, API } from '../contexts/AuthContext';
+import { useState, useEffect, useRef } from 'react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { useHotkeys } from 'react-hotkeys-hook';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../hooks/useToast';
 import { Spinner, Badge } from '../ui';
+import { ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, Info, Keyboard } from 'lucide-react';
 
-export default function ReviewDashboard({ selectedExam }) {
-  const { authFetch, token } = useAuth();
-  const [exams, setExams] = useState([]);
-  const [examId, setExamId] = useState(selectedExam?.id ?? null);
-  const [answers, setAnswers] = useState([]);
-  const [index, setIndex] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [total, setTotal] = useState(0);
-  const [stats, setStats] = useState(null);
-  const [overrideOpen, setOverrideOpen] = useState(false);
-  const [overrideGrade, setOverrideGrade] = useState('');
-  const [overrideReason, setOverrideReason] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [filterStatus, setFilterStatus] = useState('graded');
-  const [toast, setToast] = useState(null);
+export default function ReviewDashboard({ exam, onBack }) {
+  const { authFetch } = useAuth();
+  const { addToast } = useToast();
   
-  // OCR editable state (local only, for TA reference/correction before grading)
-  const [editableOcr, setEditableOcr] = useState('');
+  const [answers, setAnswers] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  
+  // Local override state
+  const [overrideScore, setOverrideScore] = useState('');
+  const [taNotes, setTaNotes] = useState('');
+  
+  const scoreInputRef = useRef(null);
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 2500);
-  };
-
-  useEffect(() => {
-    authFetch('/api/exams').then(r => r.json()).then(setExams);
-  }, []);
-
-  const loadAnswers = useCallback(async (eid, status = filterStatus) => {
-    if (!eid) return;
-    setLoading(true);
+  const fetchAnswers = async () => {
     try {
-      const res = await authFetch(`/api/exams/${eid}/dashboard?status=${status}&limit=100`);
+      const res = await authFetch(`/api/exams/${exam.id}/answers`);
       const data = await res.json();
-      setAnswers(data.items || []);
-      setTotal(data.total || 0);
-      setIndex(0);
-      const sRes = await authFetch(`/api/exams/${eid}/stats`);
-      setStats(await sRes.json());
+      setAnswers(data);
+    } catch (err) {
+      addToast("Failed to load answers", "error");
     } finally {
       setLoading(false);
     }
-  }, [filterStatus]);
+  };
 
+  useEffect(() => { fetchAnswers(); }, [exam.id]);
+
+  const currentAnswer = answers[currentIndex];
+  const grade = currentAnswer?.grade || {};
+
+  // Reset local state when answer changes
   useEffect(() => {
-    if (examId) loadAnswers(examId);
-  }, [examId]);
+    if (currentAnswer) {
+      setOverrideScore(currentAnswer.grade?.final_score ?? '');
+      setTaNotes(currentAnswer.grade?.ta_notes ?? '');
+    }
+  }, [currentIndex, currentAnswer]);
 
-  const current = answers[index];
-  
-  // Reset editable OCR when answer changes
-  useEffect(() => {
-    if (current) setEditableOcr(current.ocr_text || '');
-  }, [current]);
+  const handleNext = () => {
+    if (currentIndex < answers.length - 1) setCurrentIndex(prev => prev + 1);
+  };
 
-  useEffect(() => {
-    const onKey = e => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'a' || e.key === 'A') handleApprove();
-      if (e.key === 'o' || e.key === 'O') setOverrideOpen(true);
-      if (e.key === 'n' || e.key === 'ArrowRight') handleNext();
-      if (e.key === 'p' || e.key === 'ArrowLeft') handlePrev();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [answers, index, current, submitting]);
+  const handlePrev = () => {
+    if (currentIndex > 0) setCurrentIndex(prev => prev - 1);
+  };
 
-  const handleNext = () => setIndex(i => Math.min(i + 1, answers.length - 1));
-  const handlePrev = () => setIndex(i => Math.max(i - 0, 0)); // keep 0 if 0
-
-  const handleApprove = async () => {
-    if (!current || submitting) return;
-    setSubmitting(true);
+  const saveReview = async (isApprove = true) => {
+    if (!currentAnswer) return;
+    setSaving(true);
     try {
-      await authFetch(`/api/answers/${current.id}/review`, {
-        method: 'PATCH',
+      const payload = {
+        final_score: isApprove ? (grade.ai_score ?? 0) : parseFloat(overrideScore),
+        ta_notes: taNotes,
+        status: isApprove ? 'reviewed' : 'flagged'
+      };
+      
+      const res = await authFetch(`/api/answers/${currentAnswer.id}/review`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approve' }),
+        body: JSON.stringify(payload)
       });
-      showToast('✅ Approved!');
-      setAnswers(prev => prev.filter(a => a.id !== current.id));
-      setStats(s => s ? { ...s, approved: s.approved + 1, graded: s.graded - 1 } : s);
+      
+      if (!res.ok) throw new Error("Failed to save review");
+      
+      addToast(isApprove ? "Approved" : "Flagged", "success");
+      handleNext();
+    } catch (err) {
+      addToast(err.message, "error");
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  const handleOverride = async () => {
-    if (!current || !overrideGrade || submitting) return;
-    setSubmitting(true);
-    try {
-      await authFetch(`/api/answers/${current.id}/review`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'override', ta_grade: parseFloat(overrideGrade), ta_override_reason: overrideReason }),
-      });
-      showToast('✏️ Override saved!', 'success');
-      setAnswers(prev => prev.filter(a => a.id !== current.id));
-      setStats(s => s ? { ...s, overridden: s.overridden + 1, graded: s.graded - 1 } : s);
-      setOverrideOpen(false); setOverrideGrade(''); setOverrideReason('');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  // Keyboard Shortcuts
+  useHotkeys('a', () => saveReview(true), [currentAnswer, grade]);
+  useHotkeys('r', () => saveReview(false), [currentAnswer, overrideScore, taNotes]);
+  useHotkeys('j', handleNext, [currentIndex, answers]);
+  useHotkeys('k', handlePrev, [currentIndex]);
+  useHotkeys('o', (e) => { e.preventDefault(); scoreInputRef.current?.focus(); });
+  useHotkeys('shift+?', () => alert("Shortcuts: A (Approve), R (Reject/Flag), J (Next), K (Prev), O (Focus Score)"));
 
-  const changeFilter = s => {
-    setFilterStatus(s);
-    loadAnswers(examId, s);
-  };
+  if (loading) return <div className="h-[80vh] flex items-center justify-center"><Spinner /></div>;
+  if (!currentAnswer) return <div className="h-[80vh] flex items-center justify-center text-[#5a5a78]">No answers found for this exam.</div>;
 
   return (
-    <div className="h-screen w-full bg-[#0a0a0f] text-[#e2e2f0] flex flex-col font-sans text-sm overflow-hidden selection:bg-accent-glow">
+    <div className="fixed inset-0 top-20 bg-[#0a0a0f] flex flex-col overflow-hidden">
       {/* TOP BAR */}
-      <header className="h-14 border-b border-[#2a2a3a] bg-[#111118] flex items-center justify-between px-4 shrink-0 z-10 shadow-sm">
+      <div className="h-14 border-b border-[#2a2a3a] bg-[#111118] px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
-          <div className="font-semibold text-white tracking-wide text-base">TA Review Queue</div>
-          <select 
-            className="bg-[#1a1a25] border border-[#3a3a50] rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-accent hover:border-[#4a4a60] transition-colors appearance-none pr-8 cursor-pointer relative"
-            value={examId ?? ''} 
-            onChange={e => setExamId(Number(e.target.value))}
-          >
-            <option value="">Select exam...</option>
-            {exams.map(ex => <option key={ex.id} value={ex.id}>{ex.title}</option>)}
-          </select>
-          {examId && (
-            <div className="flex bg-[#1a1a25] rounded-md border border-[#2a2a3a] overflow-hidden ml-2 p-0.5">
-              {['graded', 'approved', 'overridden', 'pending'].map(s => (
-                <button 
-                  key={s} 
-                  className={`px-3 py-1 text-xs uppercase tracking-wider font-medium rounded-sm transition-all ${filterStatus === s ? 'bg-[#3a3a50] text-white shadow-sm' : 'text-[#9898b8] hover:text-[#e2e2f0] hover:bg-[#22222f]'}`} 
-                  onClick={() => changeFilter(s)}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
+          <button onClick={onBack} className="text-[#5a5a78] hover:text-white transition-colors">
+            <ChevronLeft size={20} />
+          </button>
+          <div className="h-4 w-[1px] bg-[#2a2a3a]" />
+          <div>
+            <span className="text-white font-semibold">{exam.title}</span>
+            <span className="text-[#5a5a78] text-xs font-mono ml-3">ITEM {currentIndex + 1} / {answers.length}</span>
+          </div>
         </div>
 
-        {current && (
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-              <span className="text-[#9898b8] uppercase tracking-wider text-xs">Student ID</span>
-              <span className="font-mono text-white bg-[#1a1a25] px-2 py-0.5 rounded border border-[#2a2a3a]">{current.student_name || current.student_id}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[#9898b8] uppercase tracking-wider text-xs">Question</span>
-              <span className="font-mono text-white bg-[#1a1a25] px-2 py-0.5 rounded border border-[#2a2a3a]">Q{current.question_number}</span>
-            </div>
-            <Badge status={current.status} />
+        <div className="flex items-center gap-3">
+          <Badge status={currentAnswer.extraction_status === 'completed' ? 'ready' : 'pending'}>
+            {currentAnswer.extraction_status.toUpperCase()}
+          </Badge>
+          <div className="flex bg-[#0a0a0f] rounded-lg border border-[#2a2a3a] p-1">
+            <button onClick={handlePrev} className="p-1 hover:bg-[#2a2a3a] rounded text-[#5a5a78] hover:text-white"><ChevronLeft size={18} /></button>
+            <button onClick={handleNext} className="p-1 hover:bg-[#2a2a3a] rounded text-[#5a5a78] hover:text-white"><ChevronRight size={18} /></button>
           </div>
-        )}
-
-        <div className="flex items-center gap-3 text-xs text-[#5a5a78]">
-          <div className="flex items-center gap-1"><kbd className="bg-[#1a1a25] border border-[#2a2a3a] rounded px-1.5 py-0.5 font-mono text-white">A</kbd> Approve</div>
-          <div className="flex items-center gap-1"><kbd className="bg-[#1a1a25] border border-[#2a2a3a] rounded px-1.5 py-0.5 font-mono text-white">O</kbd> Override</div>
         </div>
-      </header>
+      </div>
 
-      {/* MAIN CONTENT */}
-      <main className="flex-1 flex overflow-hidden bg-[#0a0a0f]">
-        {!examId ? (
-          <div className="flex-1 flex items-center justify-center flex-col text-[#5a5a78]">
-            <div className="text-4xl mb-4 opacity-50">📋</div>
-            <h2 className="text-lg font-medium text-[#9898b8]">Select an exam to start reviewing</h2>
+      {/* THREE PANE CONTENT */}
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* PANE 1: IMAGE (40%) */}
+        <div className="w-[40%] border-r border-[#2a2a3a] bg-[#050508] relative overflow-hidden flex flex-col">
+          <div className="absolute top-4 left-4 z-10 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-mono text-[#5a5a78] border border-white/5">
+            ORIGINAL_SCAN_200DPI
           </div>
-        ) : loading ? (
-          <div className="flex-1 flex items-center justify-center text-[#9898b8] gap-3">
-            <Spinner large /> Loading queue...
-          </div>
-        ) : answers.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center flex-col text-[#5a5a78]">
-            <div className="text-4xl mb-4 opacity-50">🎉</div>
-            <h2 className="text-lg font-medium text-[#9898b8]">Queue is empty</h2>
-            <p className="mt-2">No answers matching the current filter.</p>
-          </div>
-        ) : (
-          <>
-            {/* LEFT PANEL: Original Image */}
-            <section className="w-[35%] border-r border-[#2a2a3a] bg-[#111118] flex flex-col relative">
-              <div className="h-10 border-b border-[#2a2a3a] flex items-center justify-between px-4 bg-[#1a1a25] shrink-0">
-                <h3 className="font-mono text-xs uppercase tracking-widest text-[#9898b8]">Source Document</h3>
-                <div className="flex gap-2">
-                  <button className="text-[#5a5a78] hover:text-white transition-colors" title="Zoom Out">🔍-</button>
-                  <button className="text-[#5a5a78] hover:text-white transition-colors" title="Zoom In">🔍+</button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-auto p-4 flex justify-center bg-[#0a0a0f]">
-                {current.image_path ? (
-                  <img 
-                    src={`${API}/${current.image_path}`} 
-                    alt="Student Answer" 
-                    className="max-w-full h-auto object-contain shadow-md rounded border border-[#2a2a3a] bg-white filter contrast-[1.05]"
-                  />
-                ) : (
-                  <div className="m-auto text-[#5a5a78] font-mono text-xs border border-dashed border-[#3a3a50] p-8 rounded-md">
-                    NO IMAGE AVAILABLE
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* CENTER PANEL: OCR & Transcription */}
-            <section className="w-[30%] border-r border-[#2a2a3a] bg-[#111118] flex flex-col">
-              <div className="h-10 border-b border-[#2a2a3a] flex items-center px-4 bg-[#1a1a25] shrink-0">
-                <h3 className="font-mono text-xs uppercase tracking-widest text-[#9898b8]">Extracted Text</h3>
-              </div>
-              <div className="flex-1 p-4 flex flex-col">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-[#5a5a78] uppercase tracking-wider">Editable Transcription</span>
-                </div>
-                <textarea 
-                  className="flex-1 w-full bg-[#1a1a25] border border-[#2a2a3a] rounded-md p-4 text-[#e2e2f0] font-mono text-sm leading-relaxed focus:border-accent focus:ring-1 focus:ring-accent outline-none resize-none transition-all"
-                  value={editableOcr}
-                  onChange={e => setEditableOcr(e.target.value)}
-                  placeholder="OCR text will appear here..."
-                />
-              </div>
-            </section>
-
-            {/* RIGHT PANEL: Rubric, AI Grade, Action */}
-            <section className="w-[35%] bg-[#111118] flex flex-col relative overflow-hidden">
-              <div className="h-10 border-b border-[#2a2a3a] flex items-center px-4 bg-[#1a1a25] shrink-0">
-                <h3 className="font-mono text-xs uppercase tracking-widest text-[#9898b8]">Evaluation Dashboard</h3>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
-                
-                {/* AI Score Card */}
-                <div className="bg-[#1a1a25] border border-[#2a2a3a] rounded-lg p-5 shadow-sm relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-3 opacity-10">
-                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                  </div>
-                  <h4 className="text-xs uppercase tracking-wider text-[#9898b8] mb-3">AI Evaluation Score</h4>
-                  <div className="flex items-baseline gap-2 mb-4">
-                    <span className="text-5xl font-bold text-white tracking-tight">{current.ai_grade ?? '-'}</span>
-                    <span className="text-xl text-[#5a5a78]">/ {current.max_points} pts</span>
-                  </div>
-                  <div className="text-sm text-[#e2e2f0] leading-relaxed bg-[#111118] p-3 rounded border border-[#2a2a3a]">
-                    <span className="block text-xs uppercase text-[#5a5a78] mb-1 font-mono">Justification</span>
-                    {current.ai_justification || 'No detailed justification provided.'}
-                  </div>
-                </div>
-
-                {/* Plagiarism Alert */}
-                {current.plagiarism_flag && (
-                  <div className="bg-[#ef4444]/10 border border-[#ef4444]/30 rounded-lg p-4 flex items-start gap-3">
-                    <div className="text-[#ef4444] text-xl">🚨</div>
-                    <div>
-                      <h4 className="text-[#ef4444] font-medium text-sm">Plagiarism Flagged</h4>
-                      <p className="text-[#ef4444]/80 text-xs mt-1">Similarity score: {(current.plagiarism_score * 100).toFixed(1)}%. Review carefully before approving.</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Rubric Breakdown */}
-                <div className="flex flex-col gap-3 flex-1">
-                  <h4 className="text-xs uppercase tracking-wider text-[#9898b8] border-b border-[#2a2a3a] pb-2">Rubric Criteria</h4>
-                  <div className="flex flex-col gap-2">
-                    {current.rubric_items?.length ? current.rubric_items.map((ri, i) => (
-                      <div key={i} className="flex justify-between items-center bg-[#1a1a25] p-3 rounded-md border border-[#2a2a3a] group hover:border-[#4a4a60] transition-colors">
-                        <span className="text-sm text-[#e2e2f0] pr-4">{ri.description}</span>
-                        <span className="font-mono text-xs font-medium text-[#7c6af7] bg-[#7c6af7]/10 px-2 py-1 rounded shrink-0">{ri.points} pts</span>
-                      </div>
-                    )) : (
-                      <div className="text-[#5a5a78] italic text-sm py-2">No rubric items assigned.</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </section>
-          </>
-        )}
-      </main>
-
-      {/* BOTTOM ACTION BAR */}
-      {current && !loading && (
-        <footer className="h-16 border-t border-[#2a2a3a] bg-[#111118] flex items-center justify-between px-6 shrink-0 shadow-[0_-4px_24px_rgba(0,0,0,0.2)] z-20">
-          <div className="flex items-center gap-4">
-            <span className="font-mono text-sm text-[#9898b8] bg-[#1a1a25] px-3 py-1 rounded border border-[#2a2a3a]">
-              {index + 1} <span className="text-[#5a5a78]">of</span> {answers.length}
-            </span>
-            <div className="w-48 h-1.5 bg-[#1a1a25] rounded-full overflow-hidden border border-[#2a2a3a]">
-              <div 
-                className="h-full bg-accent transition-all duration-300" 
-                style={{ width: `${((index + 1) / answers.length) * 100}%` }}
+          <TransformWrapper centerOnInit initialScale={0.8} minScale={0.1} maxScale={4}>
+            <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full flex items-center justify-center">
+              <img 
+                src={`/api/storage/${currentAnswer.crop_path.replace('storage/', '')}`} 
+                alt="Student Answer" 
+                className="max-w-none shadow-2xl"
               />
-            </div>
-            {stats && (
-              <span className="text-xs text-[#5a5a78]">
-                {stats.total_answers ? Math.round(((stats.approved + stats.overridden) / stats.total_answers) * 100) : 0}% Queue Reviewed
-              </span>
-            )}
+            </TransformComponent>
+          </TransformWrapper>
+        </div>
+
+        {/* PANE 2: RUBRIC (30%) */}
+        <div className="w-[30%] border-r border-[#2a2a3a] flex flex-col bg-[#0a0a0f]">
+          <div className="px-6 py-4 border-b border-[#2a2a3a] bg-[#111118]/50">
+            <h3 className="text-xs uppercase tracking-widest text-[#5a5a78] font-bold">Rubric Evaluation</h3>
           </div>
-
-          <div className="flex items-center gap-4">
-            <div className="flex rounded-md overflow-hidden border border-[#3a3a50] mr-4 shadow-sm">
-              <button className="px-4 py-2 bg-[#1a1a25] text-white hover:bg-[#2a2a3a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium border-r border-[#3a3a50]" onClick={() => setIndex(i => Math.max(i - 1, 0))} disabled={index === 0}>
-                Prev
-              </button>
-              <button className="px-4 py-2 bg-[#1a1a25] text-white hover:bg-[#2a2a3a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium" onClick={() => setIndex(i => Math.min(i + 1, answers.length - 1))} disabled={index === answers.length - 1}>
-                Next
-              </button>
-            </div>
-
-            <button
-              className="px-6 py-2 bg-[#ef4444]/10 text-[#ef4444] border border-[#ef4444]/30 rounded-md text-sm font-medium hover:bg-[#ef4444] hover:text-white transition-all focus:ring-2 focus:ring-[#ef4444]/50 disabled:opacity-50 flex items-center gap-2"
-              onClick={() => { setOverrideGrade(String(current.ai_grade ?? '')); setOverrideOpen(true); }}
-              disabled={submitting}
-            >
-              Override <span className="text-xs opacity-60 font-mono tracking-tighter">[O]</span>
-            </button>
-            <button
-              className="px-8 py-2 bg-[#22c55e] text-[#052e14] border border-[#22c55e] rounded-md text-sm font-semibold hover:bg-[#16a34a] hover:border-[#16a34a] hover:text-white transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)] focus:ring-2 focus:ring-[#22c55e]/50 disabled:opacity-50 flex items-center gap-2"
-              onClick={handleApprove}
-              disabled={submitting}
-            >
-              {submitting ? <Spinner /> : 'Approve'} <span className="text-xs opacity-70 font-mono tracking-tighter bg-black/10 px-1 rounded">[A]</span>
-            </button>
-          </div>
-        </footer>
-      )}
-
-      {/* OVERRIDE MODAL */}
-      {overrideOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={e => e.target === e.currentTarget && setOverrideOpen(false)}>
-          <div className="bg-[#111118] border border-[#2a2a3a] rounded-xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-white">Override AI Grade</h3>
-              <button className="text-[#5a5a78] hover:text-white transition-colors" onClick={() => setOverrideOpen(false)}>✕</button>
-            </div>
-            
-            <div className="flex flex-col gap-4">
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-[#9898b8] mb-2 font-medium">New Grade (Max: {current?.max_points})</label>
-                <div className="relative">
-                  <input
-                    className="w-full bg-[#1a1a25] border border-[#3a3a50] rounded-md px-4 py-3 text-white text-lg focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all font-mono"
-                    type="number" min={0} max={current?.max_points} step={0.5}
-                    value={overrideGrade}
-                    onChange={e => setOverrideGrade(e.target.value)}
-                    autoFocus
-                  />
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[#5a5a78] font-mono pointer-events-none">/ {current?.max_points}</div>
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {grade.ai_breakdown_json?.criteria_evals?.map((ev, i) => (
+              <div key={i} className="flex gap-4 group">
+                <div className="shrink-0 mt-1">
+                  {ev.status === 'met' ? <CheckCircle size={18} className="text-[#22c55e]" /> : 
+                   ev.status === 'partial' ? <AlertCircle size={18} className="text-accent" /> : 
+                   <XCircle size={18} className="text-[#ef4444]" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-mono text-white/80">{ev.criterion_id}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                      ev.status === 'met' ? 'bg-[#22c55e]/10 text-[#22c55e]' : 
+                      ev.status === 'partial' ? 'bg-accent/10 text-accent' : 
+                      'bg-[#ef4444]/10 text-[#ef4444]'
+                    }`}>
+                      {ev.marks_awarded} PTS
+                    </span>
+                  </div>
+                  <p className="text-sm text-[#e2e2f0] leading-relaxed mb-2">{ev.reasoning}</p>
+                  <div className="text-[10px] font-mono text-[#5a5a78] bg-[#111118] p-2 rounded italic">
+                    "{ev.evidence}"
+                  </div>
                 </div>
               </div>
-              
+            ))}
+          </div>
+        </div>
+
+        {/* PANE 3: DECISION (30%) */}
+        <div className="w-[30%] flex flex-col bg-[#111118]">
+          <div className="px-6 py-4 border-b border-[#2a2a3a] bg-[#1a1a25]">
+            <h3 className="text-xs uppercase tracking-widest text-accent font-bold">AI Decision Insight</h3>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-8 flex flex-col">
+            <div className="mb-8">
+              <div className="text-[10px] uppercase tracking-widest text-[#5a5a78] mb-3">AI Justification</div>
+              <p className="text-white text-lg font-medium leading-relaxed italic">
+                "{grade.ai_justification}"
+              </p>
+            </div>
+
+            <div className="h-[1px] bg-[#2a2a3a] mb-8" />
+
+            <div className="space-y-6">
               <div>
-                <label className="block text-xs uppercase tracking-wider text-[#9898b8] mb-2 font-medium">Reason for Override (Optional)</label>
-                <textarea
-                  className="w-full bg-[#1a1a25] border border-[#3a3a50] rounded-md px-4 py-3 text-white text-sm focus:border-accent focus:ring-1 focus:ring-accent outline-none resize-none transition-all h-24"
-                  placeholder="Explain why you're changing the AI's grade..."
-                  value={overrideReason}
-                  onChange={e => setOverrideReason(e.target.value)}
+                <label className="block text-[10px] uppercase tracking-widest text-[#5a5a78] mb-3">Score Adjustment <span className="text-accent ml-2 font-mono">(O)</span></label>
+                <div className="flex items-end gap-3">
+                  <input 
+                    ref={scoreInputRef}
+                    type="number"
+                    step="0.5"
+                    className="w-24 bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg px-4 py-3 text-2xl font-bold text-white focus:border-accent outline-none"
+                    value={overrideScore}
+                    onChange={e => setOverrideScore(e.target.value)}
+                  />
+                  <div className="text-xl text-[#5a5a78] mb-2">/ {currentAnswer.question?.max_marks}</div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-[#5a5a78] mb-3">Internal TA Notes</label>
+                <textarea 
+                  className="w-full h-32 bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg p-4 text-sm text-white focus:border-accent outline-none resize-none"
+                  placeholder="Reason for override or flags..."
+                  value={taNotes}
+                  onChange={e => setTaNotes(e.target.value)}
                 />
               </div>
             </div>
 
-            <div className="flex gap-3 mt-8">
-              <button className="flex-1 px-4 py-2.5 bg-transparent border border-[#3a3a50] text-[#e2e2f0] rounded-md text-sm font-medium hover:bg-[#1a1a25] transition-colors" onClick={() => setOverrideOpen(false)}>
-                Cancel
-              </button>
-              <button className="flex-[2] px-4 py-2.5 bg-accent text-white rounded-md text-sm font-medium hover:bg-accent2 transition-colors disabled:opacity-50 shadow-[0_0_15px_rgba(124,106,247,0.3)] flex justify-center" onClick={handleOverride} disabled={!overrideGrade || submitting}>
-                {submitting ? <Spinner /> : 'Save Override'}
-              </button>
+            <div className="mt-auto pt-8 flex flex-col gap-3">
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => saveReview(true)}
+                  disabled={saving}
+                  className="flex-1 bg-white text-black font-bold py-4 rounded-xl hover:bg-gray-200 transition-all shadow-xl flex items-center justify-center gap-2"
+                >
+                  {saving ? <Spinner /> : <><CheckCircle size={18} /> Approve (A)</>}
+                </button>
+                <button 
+                  onClick={() => saveReview(false)}
+                  disabled={saving}
+                  className="w-16 bg-[#1a1a25] border border-[#2a2a3a] text-[#ef4444] rounded-xl hover:bg-[#ef4444]/10 transition-all flex items-center justify-center"
+                  title="Flag for Review (R)"
+                >
+                  <AlertCircle size={20} />
+                </button>
+              </div>
+              <div className="flex items-center justify-center gap-6 text-[10px] font-mono text-[#5a5a78] mt-2">
+                <span className="flex items-center gap-1"><Keyboard size={12} /> J/K: Navigate</span>
+                <span className="flex items-center gap-1"><Keyboard size={12} /> SHIFT + ?: Help</span>
+              </div>
             </div>
           </div>
         </div>
-      )}
-
-      {/* TOAST NOTIFICATION */}
-      {toast && (
-        <div className="fixed bottom-20 right-6 z-50 flex items-center gap-3 bg-[#1a1a25] border border-[#2a2a3a] px-5 py-3 rounded-lg shadow-xl animate-in slide-in-from-right-4 duration-300">
-          <span className="text-white text-sm font-medium">{toast.msg}</span>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

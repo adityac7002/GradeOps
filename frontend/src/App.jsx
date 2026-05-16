@@ -4,7 +4,7 @@ import InstructorDashboard from './dashboard/InstructorDashboard';
 import ReviewDashboard from './review/ReviewDashboard';
 import ExamUpload from './uploads/ExamUpload';
 import AnalyticsDashboard from './analytics/AnalyticsDashboard';
-import Navbar from './ui/Navbar';
+import { Navbar } from './ui/Navbar';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './hooks/useToast';
 

@@ -41,7 +41,6 @@ async def upload_exam_package(
         raise HTTPException(400, detail=f"Rubric validation failed: {error_msg}")
 
     # 2. Create Exam
-    exam = models.User(id=current_user.id) # Dummy to check relation, wait
     exam = models.Exam(
         title=title,
         owner_id=current_user.id,

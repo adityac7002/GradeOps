@@ -1,6 +1,6 @@
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 
-export function Navbar({ page, setPage }) {
+export function Navbar({ activePage, setPage }) {
   const { user, logout } = useAuth();
 
   return (
@@ -16,13 +16,13 @@ export function Navbar({ page, setPage }) {
         {user?.role === 'instructor' && (
           <div className="flex items-center gap-1">
             <button 
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${page === 'dashboard' ? 'bg-[#1a1a25] text-white border border-[#3a3a50]' : 'text-[#9898b8] hover:text-white hover:bg-[#111118]'}`} 
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${activePage === 'dashboard' ? 'bg-[#1a1a25] text-white border border-[#3a3a50]' : 'text-[#9898b8] hover:text-white hover:bg-[#111118]'}`} 
               onClick={() => setPage('dashboard')}
             >
               <span className="opacity-70">📊</span> Ops Center
             </button>
             <button 
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${page === 'upload' ? 'bg-[#1a1a25] text-white border border-[#3a3a50]' : 'text-[#9898b8] hover:text-white hover:bg-[#111118]'}`} 
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${activePage === 'upload' ? 'bg-[#1a1a25] text-white border border-[#3a3a50]' : 'text-[#9898b8] hover:text-white hover:bg-[#111118]'}`} 
               onClick={() => setPage('upload')}
             >
               <span className="opacity-70">➕</span> New Pipeline
@@ -33,13 +33,13 @@ export function Navbar({ page, setPage }) {
         {user?.role === 'ta' && (
           <div className="flex items-center gap-1">
             <button 
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${page === 'dashboard' || page === 'review' ? 'bg-[#1a1a25] text-white border border-[#3a3a50]' : 'text-[#9898b8] hover:text-white hover:bg-[#111118]'}`} 
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${activePage === 'dashboard' || activePage === 'review' ? 'bg-[#1a1a25] text-white border border-[#3a3a50]' : 'text-[#9898b8] hover:text-white hover:bg-[#111118]'}`} 
               onClick={() => setPage('dashboard')}
             >
               <span className="opacity-70">✅</span> Review Queue
             </button>
             <button 
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${page === 'plagiarism' ? 'bg-[#1a1a25] text-white border border-[#3a3a50]' : 'text-[#9898b8] hover:text-white hover:bg-[#111118]'}`} 
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${activePage === 'plagiarism' ? 'bg-[#1a1a25] text-white border border-[#3a3a50]' : 'text-[#9898b8] hover:text-white hover:bg-[#111118]'}`} 
               onClick={() => setPage('plagiarism')}
             >
               <span className="opacity-70">🔍</span> Plagiarism

@@ -2,6 +2,7 @@ import logging
 import json
 from typing import List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
+from google.genai import types
 from backend.db import models
 from backend.services.gemini_service import gemini
 
@@ -170,6 +171,3 @@ class GradingAgent:
         grade.final_score = score
         
         self.db.commit()
-
-# types import needed for gemini
-from google.genai import types

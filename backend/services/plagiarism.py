@@ -1,37 +1,40 @@
 """
-Plagiarism detection service — production refactor.
+Plagiarism detection service — Semantic Vector Embedding refactor.
 
-Key fixes from audit:
-- References only models that actually exist (PlagiarismFlag, Answer, Submission)
-- No reference to Answer.plagiarism_flag (column that didn't exist)
-- Stores results in PlagiarismFlag table correctly
-- Operates per-question for meaningful comparisons
+Upgraded to use SentenceTransformers to capture "similar logic structures"
+rather than just exact-word TF-IDF overlaps.
 """
 import logging
 from itertools import combinations
-from typing import Optional
-
-from sqlalchemy.orm import Session, joinedload
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+
+from sqlalchemy.orm import Session
+from sklearn.metrics.pairwise import cosine_similarity
 
 from backend.db import models
 from backend.core.logging import get_logger
 
 logger = get_logger("services.plagiarism")
 
-SIMILARITY_THRESHOLD = 0.80  # Flag pairs above this cosine similarity
+# Semantic similarity threshold is usually higher than TF-IDF
+SIMILARITY_THRESHOLD = 0.88  
+
+# Lazy load the HuggingFace embedding model to save memory until needed
+_embedding_model = None
+
+def _get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        logger.info("[Plagiarism] Loading SentenceTransformer (all-MiniLM-L6-v2)...")
+        # all-MiniLM-L6-v2 is ultra-fast, lightweight, and great for semantic similarity
+        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+    return _embedding_model
 
 
 def run_plagiarism_check(db: Session, exam_id: int) -> int:
     """
-    Run TF-IDF cosine similarity check across all extracted answers for an exam.
-
-    Operates question-by-question so comparisons are meaningful.
-
-    Returns:
-        Number of suspicious pairs detected
+    Run Semantic Cosine Similarity check across all extracted answers for an exam.
     """
     # Clear old flags for this exam
     db.query(models.PlagiarismFlag).filter(
@@ -48,9 +51,11 @@ def run_plagiarism_check(db: Session, exam_id: int) -> int:
     total_flags = 0
 
     for question in questions:
+        # Join with Grade to fetch the AI's logic breakdown
         answers = (
             db.query(models.Answer)
             .join(models.Submission)
+            .outerjoin(models.Grade, models.Answer.id == models.Grade.answer_id)
             .filter(
                 models.Submission.exam_id == exam_id,
                 models.Answer.question_id == question.id,
@@ -60,16 +65,28 @@ def run_plagiarism_check(db: Session, exam_id: int) -> int:
             .all()
         )
 
-        valid = [(a.id, a.transcribed_text) for a in answers if a.transcribed_text and a.transcribed_text.strip()]
+        valid_data = []
+        for a in answers:
+            raw_text = a.transcribed_text.strip() if a.transcribed_text else ""
+            if not raw_text:
+                continue
+                
+            # THE TRICK: Append the AI's justification to the text before embedding.
+            # This ensures we are comparing the underlying *logic structure* and mistakes.
+            semantic_payload = f"Student Answer: {raw_text}"
+            if a.grade and a.grade.ai_justification:
+                semantic_payload += f"\nLogical Analysis: {a.grade.ai_justification}"
+                
+            valid_data.append((a.id, semantic_payload))
 
-        if len(valid) < 2:
+        if len(valid_data) < 2:
             continue
 
-        answer_ids = [v[0] for v in valid]
-        texts = [v[1] for v in valid]
+        answer_ids = [v[0] for v in valid_data]
+        texts = [v[1] for v in valid_data]
 
         try:
-            similarity_matrix = _compute_similarity(texts)
+            similarity_matrix = _compute_semantic_similarity(texts)
         except Exception as e:
             logger.warning("Could not compute similarity for Q%d: %s", question.number, e)
             continue
@@ -95,13 +112,12 @@ def run_plagiarism_check(db: Session, exam_id: int) -> int:
     return total_flags
 
 
-def _compute_similarity(texts: list[str]) -> np.ndarray:
-    """Compute pairwise TF-IDF cosine similarity matrix."""
-    vectorizer = TfidfVectorizer(
-        ngram_range=(1, 2),
-        min_df=1,
-        stop_words="english",
-        strip_accents="unicode",
-    )
-    matrix = vectorizer.fit_transform(texts)
-    return cosine_similarity(matrix)
+def _compute_semantic_similarity(texts: list[str]) -> np.ndarray:
+    """Compute pairwise cosine similarity using dense vector embeddings."""
+    model = _get_embedding_model()
+    
+    # Generate embeddings (returns a numpy array of vectors)
+    embeddings = model.encode(texts, convert_to_numpy=True)
+    
+    # Compute cosine similarity matrix
+    return cosine_similarity(embeddings)

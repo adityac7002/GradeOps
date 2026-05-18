@@ -75,8 +75,13 @@ class GradingAgent:
         Reference Solution:
         \"\"\"{context["answer_key"]}\"\"\"
         
-        Criteria:
+        Criteria (Pay strict attention to the maximum marks per criterion):
         {json.dumps(criteria_list, indent=2)}
+        
+        CRITICAL RULES:
+        1. 'marks_awarded' MUST NOT exceed the maximum points allowed for that specific criterion.
+        2. If 'status' is 'not_met', marks_awarded must be 0.
+        3. If 'status' is 'partial', marks_awarded must be strictly greater than 0 but less than the maximum points.
         
         Return a list of evaluations, one for each criterion ID.
         For each evaluation, provide:

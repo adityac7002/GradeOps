@@ -1,7 +1,7 @@
 .PHONY: dev install migrate reset-db frontend build help
 
-NODE := /tmp/node-v22.13.1-darwin-arm64/bin/node
-NPM  := /tmp/node-v22.13.1-darwin-arm64/bin/npm
+NODE := /Users/adityachauhan/.nvm/versions/node/v20.20.2/bin/node
+NPM  := /Users/adityachauhan/.nvm/versions/node/v20.20.2/bin/npm
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -17,6 +17,12 @@ dev-bg: ## Run FastAPI server in background
 
 frontend: ## Start Vite dev server (requires Node)
 	PATH="$(dir $(NODE)):$(PATH)" $(NPM) --prefix frontend run dev
+
+frontend-install: ## Install frontend npm dependencies
+	PATH="$(dir $(NODE)):$(PATH)" $(NPM) --prefix frontend install
+
+frontend-add: ## Add a frontend package (usage: make frontend-add PKG=some-package)
+	PATH="$(dir $(NODE)):$(PATH)" $(NPM) --prefix frontend install $(PKG)
 
 build: ## Build frontend production bundle
 	PATH="$(dir $(NODE)):$(PATH)" $(NPM) --prefix frontend run build

@@ -1,65 +1,69 @@
-from fastapi import APIRouter, Depends, HTTPException
+"""
+Plagiarism endpoints — v1.
+
+Properly wired router with correct model references.
+Replaces the dead plagiarism.py that referenced non-existent models.
+"""
+import logging
+from fastapi import APIRouter, Depends, BackgroundTasks, status
 from sqlalchemy.orm import Session
 
+from backend.core.security import get_current_user, require_role
+from backend.db import models
+from backend.db.repositories import ExamRepository
 from backend.db.session import get_db
-from backend import models
-from backend.db.schemas import PlagiarismPair
-from backend.core.security import get_current_user
 
-router = APIRouter(prefix="/api/exams", tags=["plagiarism"])
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["plagiarism"])
 
 
-@router.post("/{exam_id}/plagiarism/run", status_code=202)
+@router.post("/{exam_id}/plagiarism/run", status_code=status.HTTP_202_ACCEPTED)
 def run_plagiarism(
     exam_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_role("instructor", "ta")),
 ):
-    from fastapi import BackgroundTasks
-    from backend.services.plagiarism import detect_plagiarism
-    detect_plagiarism(exam_id, db)
-    return {"message": "Plagiarism detection complete"}
+    """Enqueue plagiarism detection for an exam."""
+    ExamRepository(db).get_by_id_or_raise(exam_id)
+
+    def _run():
+        from backend.db.session import SessionLocal
+        from backend.services.plagiarism import run_plagiarism_check
+        inner_db = SessionLocal()
+        try:
+            run_plagiarism_check(inner_db, exam_id)
+        finally:
+            inner_db.close()
+
+    background_tasks.add_task(_run)
+    return {"message": "Plagiarism detection queued", "exam_id": exam_id}
 
 
-@router.get("/{exam_id}/plagiarism", response_model=list[PlagiarismPair])
+@router.get("/{exam_id}/plagiarism")
 def get_plagiarism_report(
     exam_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_role("instructor", "ta")),
 ):
-    exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
-    if not exam:
-        raise HTTPException(404, "Exam not found")
+    """Fetch existing plagiarism flags for an exam."""
+    ExamRepository(db).get_by_id_or_raise(exam_id)
 
-    flagged_answers = (
-        db.query(models.Answer)
-        .join(models.StudentPaper)
-        .filter(
-            models.StudentPaper.exam_id == exam_id,
-            models.Answer.plagiarism_flag == True,
-        )
+    flags = (
+        db.query(models.PlagiarismFlag)
+        .filter(models.PlagiarismFlag.exam_id == exam_id)
+        .order_by(models.PlagiarismFlag.similarity.desc())
         .all()
     )
 
-    # Group by question and find pairs
-    from itertools import combinations
-    by_question: dict[int, list[models.Answer]] = {}
-    for a in flagged_answers:
-        by_question.setdefault(a.question_id, []).append(a)
-
-    pairs: list[PlagiarismPair] = []
-    for q_id, answers in by_question.items():
-        for a, b in combinations(answers, 2):
-            score = max(a.plagiarism_score or 0, b.plagiarism_score or 0)
-            if score >= 0.75:
-                pairs.append(PlagiarismPair(
-                    answer_id_a=a.id,
-                    answer_id_b=b.id,
-                    student_id_a=a.paper.student_id,
-                    student_id_b=b.paper.student_id,
-                    question_number=a.question.number,
-                    similarity_score=round(score, 3),
-                    ocr_text_a=a.ocr_text,
-                    ocr_text_b=b.ocr_text,
-                ))
-    return pairs
+    return [
+        {
+            "id": f.id,
+            "question_id": f.question_id,
+            "answer_ids": f.answer_ids_json,
+            "similarity": round(f.similarity, 3),
+            "cluster_id": f.cluster_id,
+            "created_at": f.created_at.isoformat(),
+        }
+        for f in flags
+    ]

@@ -1,243 +1,245 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../hooks/useToast';
-import { Spinner, Badge } from '../ui';
-import { ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, Info, Keyboard } from 'lucide-react';
+import { CheckCircle2, XCircle, ArrowRight, Save, Activity, ZoomIn, Search, FileText } from 'lucide-react';
 
 export default function ReviewDashboard({ exam, onBack }) {
   const { authFetch } = useAuth();
   const { addToast } = useToast();
   
   const [answers, setAnswers] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  
-  // Local override state
-  const [overrideScore, setOverrideScore] = useState('');
-  const [taNotes, setTaNotes] = useState('');
-  
-  const scoreInputRef = useRef(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
-  const fetchAnswers = async () => {
-    try {
-      const res = await authFetch(`/api/exams/${exam.id}/answers`);
-      const data = await res.json();
-      setAnswers(data);
-    } catch (err) {
-      addToast("Failed to load answers", "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchAnswers(); }, [exam.id]);
+  // Load answers that are ready for review (i.e. have grades)
+  useEffect(() => {
+    authFetch(`/api/exams/${exam.id}/answers?page_size=200`)
+      .then(r => r.json())
+      .then(data => {
+        const all = Array.isArray(data) ? data : (data.items ?? []);
+        const graded = all.filter(a => a.grade && a.grade.status !== 'reviewed');
+        setAnswers(graded);
+      })
+      .finally(() => setLoading(false));
+  }, [exam.id]);
 
   const currentAnswer = answers[currentIndex];
-  const grade = currentAnswer?.grade || {};
+  
+  // Local state for the current review decision
+  const [finalScore, setFinalScore] = useState('');
+  const [taNotes, setTaNotes] = useState('');
 
-  // Reset local state when answer changes
+  // Sync state when current answer changes
   useEffect(() => {
     if (currentAnswer) {
-      setOverrideScore(currentAnswer.grade?.final_score ?? '');
-      setTaNotes(currentAnswer.grade?.ta_notes ?? '');
+      setFinalScore(currentAnswer.grade?.ai_score ?? '');
+      setTaNotes('');
     }
-  }, [currentIndex, currentAnswer]);
+  }, [currentAnswer]);
 
-  const handleNext = () => {
-    if (currentIndex < answers.length - 1) setCurrentIndex(prev => prev + 1);
-  };
-
-  const handlePrev = () => {
-    if (currentIndex > 0) setCurrentIndex(prev => prev - 1);
-  };
-
-  const saveReview = async (isApprove = true) => {
+  const submitReview = async (approved) => {
     if (!currentAnswer) return;
-    setSaving(true);
     try {
       const payload = {
-        final_score: isApprove ? (grade.ai_score ?? 0) : parseFloat(overrideScore),
-        ta_notes: taNotes,
-        status: isApprove ? 'reviewed' : 'flagged'
+        final_score: parseFloat(finalScore),
+        ta_notes: taNotes || (approved ? "Approved AI grading" : "Modified AI grading"),
+        status: "reviewed"
       };
-      
-      const res = await authFetch(`/api/answers/${currentAnswer.id}/review`, {
+
+      await authFetch(`/api/exams/answers/${currentAnswer.id}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       
-      if (!res.ok) throw new Error("Failed to save review");
+      addToast(`Answer ${currentAnswer.id} reviewed`, 'success');
       
-      addToast(isApprove ? "Approved" : "Flagged", "success");
-      handleNext();
-    } catch (err) {
-      addToast(err.message, "error");
-    } finally {
-      setSaving(false);
+      if (currentIndex < answers.length - 1) {
+        setCurrentIndex(i => i + 1);
+      } else {
+        addToast('All answers reviewed!', 'success');
+        onBack();
+      }
+    } catch (e) {
+      addToast(e.message, 'error');
     }
   };
 
-  // Keyboard Shortcuts
-  useHotkeys('a', () => saveReview(true), [currentAnswer, grade]);
-  useHotkeys('r', () => saveReview(false), [currentAnswer, overrideScore, taNotes]);
-  useHotkeys('j', handleNext, [currentIndex, answers]);
-  useHotkeys('k', handlePrev, [currentIndex]);
-  useHotkeys('o', (e) => { e.preventDefault(); scoreInputRef.current?.focus(); });
-  useHotkeys('shift+?', () => alert("Shortcuts: A (Approve), R (Reject/Flag), J (Next), K (Prev), O (Focus Score)"));
+  // Keyboard shortcuts
+  useHotkeys('a', () => submitReview(true), [currentAnswer, finalScore, taNotes]);
+  useHotkeys('r', () => document.getElementById('notes_input')?.focus(), [currentAnswer]);
+  useHotkeys('j', () => { if(currentIndex > 0) setCurrentIndex(i=>i-1) }, [currentIndex]);
+  useHotkeys('k', () => { if(currentIndex < answers.length-1) setCurrentIndex(i=>i+1) }, [currentIndex, answers.length]);
 
-  if (loading) return <div className="h-[80vh] flex items-center justify-center"><Spinner /></div>;
-  if (!currentAnswer) return <div className="h-[80vh] flex items-center justify-center text-[#5a5a78]">No answers found for this exam.</div>;
+  if (loading) return (
+    <div className="h-screen flex items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #4F46E5, #7C3AED)' }}>
+          <Activity className="animate-spin text-white" size={20} />
+        </div>
+        <p className="text-sm text-text3">Loading review queue…</p>
+      </div>
+    </div>
+  );
+  if (!answers.length) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-background gap-4">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-emerald-50 border border-emerald-100">
+        <CheckCircle2 size={32} className="text-emerald-500" />
+      </div>
+      <div className="text-center">
+        <h2 className="text-xl font-bold text-text mb-1">All Caught Up</h2>
+        <p className="text-sm text-text2">No answers require review for this pipeline.</p>
+      </div>
+      <button className="btn btn-outline" onClick={onBack}>← Operations Center</button>
+    </div>
+  );
 
   return (
-    <div className="fixed inset-0 top-20 bg-[#0a0a0f] flex flex-col overflow-hidden">
-      {/* TOP BAR */}
-      <div className="h-14 border-b border-[#2a2a3a] bg-[#111118] px-6 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack} className="text-[#5a5a78] hover:text-white transition-colors">
-            <ChevronLeft size={20} />
-          </button>
-          <div className="h-4 w-[1px] bg-[#2a2a3a]" />
-          <div>
-            <span className="text-white font-semibold">{exam.title}</span>
-            <span className="text-[#5a5a78] text-xs font-mono ml-3">ITEM {currentIndex + 1} / {answers.length}</span>
+    <div className="h-[calc(100vh-64px)] bg-surface2 flex overflow-hidden">
+      
+      {/* LEFT PANE: Image Viewer */}
+      <div className="flex-[2] bg-surface border-r border-border flex flex-col relative">
+        <div className="h-12 border-b border-border bg-surface flex items-center justify-between px-4 z-10">
+          <div className="flex items-center gap-3">
+            <span className="label">Answer Image</span>
+            <span className="badge badge-indigo font-mono">#{currentAnswer.id}</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-text3">
+            <span className="kbd">Scroll</span><span>zoom</span>
+            <span className="kbd">Drag</span><span>pan</span>
           </div>
         </div>
-
-        <div className="flex items-center gap-3">
-          <Badge status={currentAnswer.extraction_status === 'completed' ? 'ready' : 'pending'}>
-            {currentAnswer.extraction_status.toUpperCase()}
-          </Badge>
-          <div className="flex bg-[#0a0a0f] rounded-lg border border-[#2a2a3a] p-1">
-            <button onClick={handlePrev} className="p-1 hover:bg-[#2a2a3a] rounded text-[#5a5a78] hover:text-white"><ChevronLeft size={18} /></button>
-            <button onClick={handleNext} className="p-1 hover:bg-[#2a2a3a] rounded text-[#5a5a78] hover:text-white"><ChevronRight size={18} /></button>
-          </div>
+        
+        <div className="flex-1 overflow-hidden relative bg-[#F8F9FA] flex items-center justify-center">
+          {currentAnswer.crop_path ? (
+             <TransformWrapper initialScale={1} minScale={0.5} maxScale={4} centerOnInit>
+               <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
+                 <img 
+                   src={`http://localhost:8000/${currentAnswer.crop_path}`} 
+                   alt="Student Answer Crop" 
+                   className="object-contain shadow-md rounded border border-border/50 bg-white"
+                   style={{ maxHeight: '80vh', maxWidth: '90vw' }}
+                 />
+               </TransformComponent>
+             </TransformWrapper>
+          ) : (
+            <div className="flex flex-col items-center justify-center text-text3">
+              <FileText size={48} className="opacity-20 mb-4" />
+              <p>Image not available</p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* THREE PANE CONTENT */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* CENTER PANE: Context & AI Justification */}
+      <div className="flex-1 bg-surface border-r border-border flex flex-col min-w-[320px]">
+        <div className="h-12 border-b border-border bg-surface flex items-center px-6 z-10 shadow-sm">
+           <span className="text-xs font-semibold uppercase tracking-wider text-text3">Evaluation Context</span>
+        </div>
         
-        {/* PANE 1: IMAGE (40%) */}
-        <div className="w-[40%] border-r border-[#2a2a3a] bg-[#050508] relative overflow-hidden flex flex-col">
-          <div className="absolute top-4 left-4 z-10 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-mono text-[#5a5a78] border border-white/5">
-            ORIGINAL_SCAN_200DPI
-          </div>
-          <TransformWrapper centerOnInit initialScale={0.8} minScale={0.1} maxScale={4}>
-            <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full flex items-center justify-center">
-              <img 
-                src={`/api/storage/${currentAnswer.crop_path.replace('storage/', '')}`} 
-                alt="Student Answer" 
-                className="max-w-none shadow-2xl"
-              />
-            </TransformComponent>
-          </TransformWrapper>
-        </div>
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <section>
+            <h3 className="text-xs font-bold text-text3 uppercase tracking-wider mb-3">Extracted Text</h3>
+            <div className="p-4 bg-surface2 rounded-xl border border-border/50 text-sm font-mono text-text leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
+              {currentAnswer.transcribed_text || "No text extracted."}
+            </div>
+          </section>
 
-        {/* PANE 2: RUBRIC (30%) */}
-        <div className="w-[30%] border-r border-[#2a2a3a] flex flex-col bg-[#0a0a0f]">
-          <div className="px-6 py-4 border-b border-[#2a2a3a] bg-[#111118]/50">
-            <h3 className="text-xs uppercase tracking-widest text-[#5a5a78] font-bold">Rubric Evaluation</h3>
-          </div>
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
-            {grade.ai_breakdown_json?.criteria_evals?.map((ev, i) => (
-              <div key={i} className="flex gap-4 group">
-                <div className="shrink-0 mt-1">
-                  {ev.status === 'met' ? <CheckCircle size={18} className="text-[#22c55e]" /> : 
-                   ev.status === 'partial' ? <AlertCircle size={18} className="text-accent" /> : 
-                   <XCircle size={18} className="text-[#ef4444]" />}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-mono text-white/80">{ev.criterion_id}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                      ev.status === 'met' ? 'bg-[#22c55e]/10 text-[#22c55e]' : 
-                      ev.status === 'partial' ? 'bg-accent/10 text-accent' : 
-                      'bg-[#ef4444]/10 text-[#ef4444]'
-                    }`}>
-                      {ev.marks_awarded} PTS
-                    </span>
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-bold text-text3 uppercase tracking-wider">AI Reasoning</h3>
+              <span className="badge badge-indigo">AI Score: {currentAnswer.grade?.ai_score}</span>
+            </div>
+            <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100 text-sm text-text leading-relaxed">
+              {currentAnswer.grade?.ai_justification || "No justification provided."}
+            </div>
+          </section>
+
+          {currentAnswer.grade?.ai_breakdown_json?.criteria_evals && (
+            <section>
+              <h3 className="text-xs font-bold text-text3 uppercase tracking-wider mb-3">Criteria Breakdown</h3>
+              <div className="space-y-2">
+                {currentAnswer.grade.ai_breakdown_json.criteria_evals.map((e, i) => (
+                  <div key={i} className="p-3 bg-surface rounded-xl border border-border text-xs">
+                    <div className="flex justify-between font-bold mb-1">
+                      <span className="text-text">{e.criterion_id}</span>
+                      <span className={e.status === 'met' ? 'text-green-600' : e.status === 'partial' ? 'text-yellow-600' : 'text-red-600'}>
+                        {e.marks_awarded} pts
+                      </span>
+                    </div>
+                    <p className="text-text2 leading-snug">{e.reasoning}</p>
                   </div>
-                  <p className="text-sm text-[#e2e2f0] leading-relaxed mb-2">{ev.reasoning}</p>
-                  <div className="text-[10px] font-mono text-[#5a5a78] bg-[#111118] p-2 rounded italic">
-                    "{ev.evidence}"
-                  </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </section>
+          )}
         </div>
+      </div>
 
-        {/* PANE 3: DECISION (30%) */}
-        <div className="w-[30%] flex flex-col bg-[#111118]">
-          <div className="px-6 py-4 border-b border-[#2a2a3a] bg-[#1a1a25]">
-            <h3 className="text-xs uppercase tracking-widest text-accent font-bold">AI Decision Insight</h3>
+      {/* RIGHT PANE: Human Decision */}
+      <div className="w-[340px] bg-surface flex flex-col shadow-[-4px_0_24px_rgba(0,0,0,0.02)] z-20">
+        <div className="h-12 border-b border-border bg-surface flex items-center px-6">
+           <span className="text-xs font-semibold uppercase tracking-wider text-text3">Final Adjudication</span>
+        </div>
+        
+        <div className="p-6 flex-1 flex flex-col">
+          
+          <div className="mb-6">
+            <label className="block text-sm font-semibold text-text mb-2">Final Score</label>
+            <input 
+              type="number" 
+              className="w-full text-3xl font-bold p-4 bg-surface2 border-2 border-border focus:border-accent rounded-xl focus:outline-none transition-colors"
+              value={finalScore}
+              onChange={e => setFinalScore(e.target.value)}
+              step="0.5"
+            />
+          </div>
+
+          <div className="mb-8">
+            <label className="block text-sm font-semibold text-text mb-2">Auditor Notes</label>
+            <textarea 
+              id="notes_input"
+              className="w-full h-32 p-3 bg-surface2 border border-border focus:border-accent rounded-xl focus:outline-none resize-none text-sm"
+              placeholder="Add justification for overrides..."
+              value={taNotes}
+              onChange={e => setTaNotes(e.target.value)}
+            />
+          </div>
+
+          <div className="mt-auto space-y-2.5">
+            <button
+              className="w-full btn btn-lg text-white border-transparent shadow-md"
+              style={{ background: 'linear-gradient(135deg, #10B981, #059669)' }}
+              onClick={() => submitReview(true)}
+            >
+              <CheckCircle2 size={17} /> Approve & Advance
+            </button>
+            <button
+              className="w-full btn btn-lg btn-danger"
+              onClick={() => submitReview(false)}
+            >
+              <Save size={16} /> Save Override
+            </button>
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-border">
+            <div className="flex justify-between items-center mb-2.5">
+              <span className="label">Review Progress</span>
+              <span className="text-xs font-mono font-bold text-accent">{currentIndex + 1} / {answers.length}</span>
+            </div>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${((currentIndex + 1) / answers.length) * 100}%` }} />
+            </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-8 flex flex-col">
-            <div className="mb-8">
-              <div className="text-[10px] uppercase tracking-widest text-[#5a5a78] mb-3">AI Justification</div>
-              <p className="text-white text-lg font-medium leading-relaxed italic">
-                "{grade.ai_justification}"
-              </p>
-            </div>
-
-            <div className="h-[1px] bg-[#2a2a3a] mb-8" />
-
-            <div className="space-y-6">
-              <div>
-                <label className="block text-[10px] uppercase tracking-widest text-[#5a5a78] mb-3">Score Adjustment <span className="text-accent ml-2 font-mono">(O)</span></label>
-                <div className="flex items-end gap-3">
-                  <input 
-                    ref={scoreInputRef}
-                    type="number"
-                    step="0.5"
-                    className="w-24 bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg px-4 py-3 text-2xl font-bold text-white focus:border-accent outline-none"
-                    value={overrideScore}
-                    onChange={e => setOverrideScore(e.target.value)}
-                  />
-                  <div className="text-xl text-[#5a5a78] mb-2">/ {currentAnswer.question?.max_marks}</div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] uppercase tracking-widest text-[#5a5a78] mb-3">Internal TA Notes</label>
-                <textarea 
-                  className="w-full h-32 bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg p-4 text-sm text-white focus:border-accent outline-none resize-none"
-                  placeholder="Reason for override or flags..."
-                  value={taNotes}
-                  onChange={e => setTaNotes(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="mt-auto pt-8 flex flex-col gap-3">
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => saveReview(true)}
-                  disabled={saving}
-                  className="flex-1 bg-white text-black font-bold py-4 rounded-xl hover:bg-gray-200 transition-all shadow-xl flex items-center justify-center gap-2"
-                >
-                  {saving ? <Spinner /> : <><CheckCircle size={18} /> Approve (A)</>}
-                </button>
-                <button 
-                  onClick={() => saveReview(false)}
-                  disabled={saving}
-                  className="w-16 bg-[#1a1a25] border border-[#2a2a3a] text-[#ef4444] rounded-xl hover:bg-[#ef4444]/10 transition-all flex items-center justify-center"
-                  title="Flag for Review (R)"
-                >
-                  <AlertCircle size={20} />
-                </button>
-              </div>
-              <div className="flex items-center justify-center gap-6 text-[10px] font-mono text-[#5a5a78] mt-2">
-                <span className="flex items-center gap-1"><Keyboard size={12} /> J/K: Navigate</span>
-                <span className="flex items-center gap-1"><Keyboard size={12} /> SHIFT + ?: Help</span>
-              </div>
-            </div>
+          <div className="mt-6 flex flex-wrap gap-2">
+             <kbd className="kbd">A</kbd> <span className="text-[10px] text-text3 mr-2">Approve</span>
+             <kbd className="kbd">R</kbd> <span className="text-[10px] text-text3 mr-2">Note</span>
+             <kbd className="kbd">J/K</kbd> <span className="text-[10px] text-text3">Nav</span>
           </div>
+
         </div>
       </div>
     </div>

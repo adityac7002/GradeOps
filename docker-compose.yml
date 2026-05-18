@@ -1,0 +1,97 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: gradeops-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gradeops
+      POSTGRES_USER: gradeops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gradeops_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gradeops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend API ─────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: gradeops-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql://gradeops:${POSTGRES_PASSWORD:-gradeops_dev}@postgres:5432/gradeops
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set in .env}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      OCR_MODEL: ${OCR_MODEL:-gemini}
+      STORAGE_DIR: /app/storage
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000"]'
+    volumes:
+      # Hot-reload source in development
+      - ./backend:/app/backend:ro
+      # Persistent file storage
+      - storage_data:/app/storage
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "
+        echo 'Running migrations...' &&
+        alembic upgrade head &&
+        echo 'Starting server...' &&
+        uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+  # ── Frontend Dev Server ─────────────────────────────────────────────────────
+  frontend:
+    image: node:22-alpine
+    container_name: gradeops-frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
+
+  # ── Nginx (production only — comment out in dev) ────────────────────────────
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: gradeops-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  #     - ./frontend/dist:/usr/share/nginx/html:ro
+  #   depends_on:
+  #     - api
+
+volumes:
+  postgres_data:
+  storage_data:

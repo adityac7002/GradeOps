@@ -16,3 +16,9 @@ dist/
 
 # Uploads (don't commit test data)
 uploads/
+
+# Temp/logs/db helper files
+*.db-shm
+*.db-wal
+*.log
+

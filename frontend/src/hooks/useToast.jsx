@@ -16,17 +16,17 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={{ addToast }}>
       {children}
-      <div className="fixed bottom-8 right-8 z-[100] flex flex-col gap-3">
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3">
         {toasts.map(t => (
           <div 
             key={t.id} 
-            className={`px-6 py-4 rounded-xl shadow-2xl border flex items-center gap-3 animate-in slide-in-from-right-8 duration-300 ${
-              t.type === 'error' ? 'bg-[#ef4444] border-red-400 text-white' : 
-              t.type === 'success' ? 'bg-[#22c55e] border-green-400 text-white' : 
-              'bg-[#111118] border-[#2a2a3a] text-white'
+            className={`px-5 py-3 rounded-lg shadow-elevated border flex items-center gap-3 animate-in slide-in-from-right-8 duration-300 bg-white ${
+              t.type === 'error' ? 'border-red-200 text-red-900' : 
+              t.type === 'success' ? 'border-green-200 text-green-900' : 
+              'border-border text-text'
             }`}
           >
-            <span className="text-lg">
+            <span className="text-base">
               {t.type === 'error' ? '🚨' : t.type === 'success' ? '✅' : 'ℹ️'}
             </span>
             <span className="text-sm font-medium">{t.message}</span>

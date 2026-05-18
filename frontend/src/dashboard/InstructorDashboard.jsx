@@ -1,128 +1,192 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Badge, Spinner } from '../ui';
+import { useToast } from '../hooks/useToast';
+import {
+  FileText, Activity, CheckCircle2, AlertCircle, Plus, ChevronRight,
+  Clock, BarChart3, Cpu, ArrowUpRight, Layers, Zap
+} from 'lucide-react';
+
+const STATUS = {
+  complete:   { label: 'Complete',   cls: 'badge-green',  dot: 'bg-green-500',  icon: CheckCircle2 },
+  processing: { label: 'Processing', cls: 'badge-blue',   dot: 'bg-blue-500',   icon: Activity     },
+  grading:    { label: 'Grading',    cls: 'badge-indigo', dot: 'bg-indigo-500', icon: Cpu          },
+  pending:    { label: 'Pending',    cls: 'badge-gray',   dot: 'bg-gray-400',   icon: Clock        },
+  failed:     { label: 'Failed',     cls: 'badge-red',    dot: 'bg-red-500',    icon: AlertCircle  },
+};
+
+function StatCard({ icon: Icon, label, value, sub, color }) {
+  return (
+    <div className="card card-hover p-5 flex items-start justify-between group cursor-default">
+      <div>
+        <p className="caption mb-1">{label}</p>
+        <p className="text-3xl font-bold tracking-tight text-text">{value}</p>
+        {sub && <p className="text-xs text-text3 mt-1.5">{sub}</p>}
+      </div>
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${color} shrink-0 group-hover:scale-110 transition-transform`}>
+        <Icon size={18} />
+      </div>
+    </div>
+  );
+}
+
+function PipelineRow({ exam, onReview, onAnalytics }) {
+  const s = STATUS[exam.status] || STATUS.pending;
+  const IconComp = s.icon;
+  return (
+    <tr className="hover:bg-surface2/40 transition-colors group cursor-pointer" onClick={() => onReview(exam)}>
+      <td className="px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-accent-muted border border-indigo-100 flex items-center justify-center shrink-0">
+            <FileText size={15} className="text-accent" />
+          </div>
+          <div>
+            <div className="font-semibold text-text text-[13.5px]">{exam.title}</div>
+            <div className="text-xs text-text3 mt-0.5 font-mono">ID #{exam.id}</div>
+          </div>
+        </div>
+      </td>
+      <td className="px-6 py-4">
+        <span className={`badge ${s.cls}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${exam.status === 'processing' ? 'animate-pulse-dot' : ''}`} />
+          {s.label}
+        </span>
+      </td>
+      <td className="px-6 py-4 text-sm text-text2">
+        {new Date(exam.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+      </td>
+      <td className="px-6 py-4 text-right">
+        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          {exam.status === 'complete' && (
+            <button className="btn btn-sm btn-ghost text-accent" onClick={e => { e.stopPropagation(); onAnalytics(exam); }}>
+              <BarChart3 size={13} /> Analytics
+            </button>
+          )}
+          <button className="btn btn-sm btn-outline" onClick={e => { e.stopPropagation(); onReview(exam); }}>
+            {exam.status === 'complete' ? 'Results' : 'Inspect'}
+            <ChevronRight size={13} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
 
 export default function InstructorDashboard({ setPage, setSelectedExam }) {
   const { authFetch } = useAuth();
+  const { addToast } = useToast();
   const [exams, setExams] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const loadExams = () => {
+  useEffect(() => {
     authFetch('/api/exams')
       .then(r => r.json())
-      .then(setExams)
+      .then(data => setExams(Array.isArray(data) ? data : (data.items ?? [])))
+      .catch(() => addToast('Failed to load exams', 'error'))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
-  useEffect(() => { loadExams(); }, []);
-
-  const openReview = (exam) => {
-    setSelectedExam(exam);
-    setPage('review');
-  };
-
-  if (loading) return (
-    <div className="flex-1 flex items-center justify-center text-[#5a5a78] gap-3 h-[80vh]">
-      <Spinner />
-      <span className="font-mono text-xs uppercase tracking-widest">Loading Pipelines...</span>
-    </div>
-  );
+  const go = (exam, page) => { setSelectedExam(exam); setPage(page); };
+  const total = exams.length;
+  const complete   = exams.filter(e => e.status === 'complete').length;
+  const processing = exams.filter(e => ['processing','grading'].includes(e.status)).length;
 
   return (
-    <div className="p-8 max-w-[1400px] mx-auto">
-      <header className="flex items-center justify-between mb-8">
+    <div className="page-wrapper py-10">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-10 animate-in fade-in duration-300">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Operation Control</h1>
-          <p className="text-[#9898b8] mt-1">Institutional-grade evaluation pipelines and VLM queues.</p>
-        </div>
-        <button 
-          className="bg-white text-black px-6 py-3 rounded-xl font-bold hover:bg-gray-200 transition-all shadow-xl flex items-center gap-2"
-          onClick={() => setPage('upload')}
-        >
-          <span className="text-xl">+</span> New Pipeline
-        </button>
-      </header>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-        <div className="bg-[#111118] border border-[#2a2a3a] p-6 rounded-2xl">
-          <div className="text-xs font-mono text-accent uppercase tracking-widest mb-2">Active Exams</div>
-          <div className="text-4xl font-bold text-white">{exams.length}</div>
-        </div>
-        <div className="bg-[#111118] border border-[#2a2a3a] p-6 rounded-2xl">
-          <div className="text-xs font-mono text-[#22c55e] uppercase tracking-widest mb-2">Queue Status</div>
-          <div className="text-4xl font-bold text-white">
-            {exams.filter(e => e.status === 'processing').length > 0 ? 'Busy' : 'Idle'}
+          <div className="flex items-center gap-2.5 mb-1">
+            <Layers size={20} className="text-accent" />
+            <h1 className="text-2xl font-bold tracking-tight text-text">Operations Center</h1>
           </div>
+          <p className="text-sm text-text2 ml-7">Manage AI grading pipelines and monitor evaluation progress.</p>
         </div>
-        <div className="bg-accent/10 border border-accent/20 p-6 rounded-2xl relative overflow-hidden group cursor-pointer" onClick={() => setPage('upload')}>
-          <div className="text-xs font-mono text-accent uppercase tracking-widest mb-2">Next Step</div>
-          <div className="text-xl font-bold text-white">Initialize Upload →</div>
-          <div className="absolute right-0 bottom-0 text-6xl opacity-5 group-hover:opacity-10 transition-opacity translate-y-4">📄</div>
-        </div>
+        <button onClick={() => setPage('upload')} className="btn btn-primary shrink-0"
+          style={{ background: 'linear-gradient(135deg, #4F46E5, #7C3AED)' }}>
+          <Plus size={15} /> New Pipeline
+        </button>
       </div>
 
-      <section className="bg-[#111118] border border-[#2a2a3a] rounded-2xl overflow-hidden shadow-2xl">
-        <div className="px-8 py-5 border-b border-[#2a2a3a] bg-[#1a1a25]/50 flex items-center justify-between">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-[#5a5a78]">Pipeline Registry</h2>
+      {/* Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 animate-in slide-in-from-bottom-4 duration-300">
+        <StatCard icon={Layers}       label="Total Pipelines"    value={total}      sub={`${complete} completed`}         color="bg-indigo-50 text-indigo-600" />
+        <StatCard icon={Activity}     label="Active Processing"  value={processing} sub="Running AI grading jobs"         color="bg-blue-50 text-blue-600" />
+        <StatCard icon={CheckCircle2} label="Fully Evaluated"    value={complete}   sub="Ready for TA review"             color="bg-emerald-50 text-emerald-600" />
+      </div>
+
+      {/* Pipeline table */}
+      <div className="card overflow-hidden !p-0 animate-in slide-in-from-bottom-4 duration-500">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-surface">
+          <div className="flex items-center gap-2.5">
+            <Zap size={15} className="text-accent" />
+            <h2 className="text-sm font-semibold text-text">Evaluation Pipelines</h2>
+            <span className="badge badge-gray">{total}</span>
+          </div>
+          <button onClick={() => setPage('upload')} className="btn btn-sm btn-outline">
+            <Plus size={12} /> New
+          </button>
         </div>
 
-        {exams.length === 0 ? (
-          <div className="py-24 flex flex-col items-center justify-center text-[#5a5a78] gap-4">
-            <span className="text-6xl">📥</span>
-            <div className="text-center">
-              <p className="text-white font-medium">No pipelines configured</p>
-              <p className="text-sm">Upload a bulk PDF scan to begin automated evaluation.</p>
+        {loading ? (
+          <div className="p-6 space-y-3">
+            {[1,2,3].map(i => (
+              <div key={i} className="h-14 rounded-lg animate-shimmer" />
+            ))}
+          </div>
+        ) : exams.length === 0 ? (
+          /* Empty state */
+          <div className="py-20 flex flex-col items-center justify-center text-center px-6">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 border border-indigo-100"
+              style={{ background: 'linear-gradient(135deg, #EEF2FF, #E0E7FF)' }}>
+              <FileText size={24} className="text-accent" />
             </div>
+            <h3 className="text-base font-semibold text-text mb-2">No pipelines yet</h3>
+            <p className="text-sm text-text2 max-w-xs mb-6">
+              Upload a scanned exam PDF and define your grading rubric to start the AI evaluation pipeline.
+            </p>
+            <button onClick={() => setPage('upload')} className="btn btn-primary"
+              style={{ background: 'linear-gradient(135deg, #4F46E5, #7C3AED)' }}>
+              <Plus size={14} /> Create First Pipeline
+            </button>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="w-full">
               <thead>
-                <tr className="bg-[#0a0a0f] text-[#5a5a78] text-[10px] uppercase tracking-widest font-mono">
-                  <th className="px-8 py-4">Status</th>
-                  <th className="px-8 py-4">Title</th>
-                  <th className="px-8 py-4">Created</th>
-                  <th className="px-8 py-4 text-right">Action</th>
+                <tr>
+                  <th className="table-header">Pipeline</th>
+                  <th className="table-header">Status</th>
+                  <th className="table-header">Created</th>
+                  <th className="table-header text-right pr-6">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#2a2a3a]">
+              <tbody>
                 {exams.map(exam => (
-                  <tr key={exam.id} className="hover:bg-[#1a1a25]/30 transition-colors group">
-                    <td className="px-8 py-6">
-                      <Badge status={exam.status} />
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className="font-bold text-white text-lg">{exam.title}</div>
-                      <div className="text-xs text-[#5a5a78] font-mono mt-1">ID: {exam.id.toString().padStart(4, '0')}</div>
-                    </td>
-                    <td className="px-8 py-6 text-[#9898b8] text-sm font-mono">
-                      {new Date(exam.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-8 py-6 text-right">
-                      <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all">
-                        {exam.status === 'complete' && (
-                          <button 
-                            className="bg-[#111118] border border-[#2a2a3a] text-accent px-4 py-2 rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-all"
-                            onClick={() => { setSelectedExam(exam); setPage('analytics'); }}
-                          >
-                            Analytics
-                          </button>
-                        )}
-                        <button 
-                          className="bg-[#2a2a3a] text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-accent transition-all"
-                          onClick={() => openReview(exam)}
-                        >
-                          {exam.status === 'complete' ? 'View Results' : 'Inspect Queue'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <PipelineRow
+                    key={exam.id}
+                    exam={exam}
+                    onReview={e => go(e, 'review')}
+                    onAnalytics={e => go(e, 'analytics')}
+                  />
                 ))}
               </tbody>
             </table>
           </div>
         )}
-      </section>
+      </div>
+
+      {/* Quick tips footer */}
+      {exams.length > 0 && (
+        <div className="mt-6 p-4 rounded-xl border border-indigo-100 bg-indigo-50/60 flex items-center gap-3 animate-in fade-in duration-500">
+          <Cpu size={16} className="text-accent shrink-0" />
+          <p className="text-xs text-indigo-700">
+            <span className="font-semibold">Tip:</span> Click any pipeline row to open the review queue. Use the Analytics button to see score distributions.
+          </p>
+          <button onClick={() => setPage('upload')} className="ml-auto btn btn-sm text-accent border-indigo-200 bg-white hover:bg-indigo-50 shrink-0">
+            New <ArrowUpRight size={11} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

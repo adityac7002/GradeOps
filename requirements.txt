@@ -1,0 +1,46 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.36
+alembic==1.14.0
+psycopg2-binary==2.9.10        # PostgreSQL driver (production)
+aiosqlite==0.20.0              # Async SQLite (development)
+
+# ── Authentication ────────────────────────────────────────────────────────────
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+
+# ── HTTP ──────────────────────────────────────────────────────────────────────
+httpx==0.27.2
+requests==2.32.3
+
+# ── AI / LLM ─────────────────────────────────────────────────────────────────
+google-generativeai==0.8.3
+openai==1.59.6
+
+# ── Vision / OCR ─────────────────────────────────────────────────────────────
+Pillow==11.1.0
+pymupdf==1.25.1                # PDF rendering (replaces fitz)
+transformers==4.47.1           # TrOCR fallback
+torch==2.5.1                   # CPU-only; omit for GPU: torch==2.5.1+cu121
+
+# ── ML / Similarity ──────────────────────────────────────────────────────────
+scikit-learn==1.6.0
+numpy==2.2.1
+
+# ── Monitoring / Observability ────────────────────────────────────────────────
+structlog==24.4.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+httpx==0.27.2                  # for TestClient
+factory-boy==3.3.1             # Model factories

@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
-import { Spinner } from '../ui';
-import { TrendingUp, Users, Clock, Award, ChevronLeft } from 'lucide-react';
+import { TrendingUp, Users, Clock, Award, ChevronLeft, Download, Info } from 'lucide-react';
 
 export default function AnalyticsDashboard({ exam, onBack }) {
   const { authFetch } = useAuth();
@@ -16,81 +15,89 @@ export default function AnalyticsDashboard({ exam, onBack }) {
       .finally(() => setLoading(false));
   }, [exam.id]);
 
-  if (loading) return <div className="h-[80vh] flex items-center justify-center"><Spinner /></div>;
-  if (!data) return <div className="h-[80vh] flex items-center justify-center text-[#5a5a78]">No data available.</div>;
+  if (loading) return <div className="h-[80vh] flex items-center justify-center"><div className="w-8 h-8 border-2 border-border border-t-accent rounded-full animate-spin"></div></div>;
+  if (!data) return <div className="h-[80vh] flex items-center justify-center text-text3">No data available.</div>;
 
   const chartData = Object.entries(data.distribution).map(([bucket, count]) => ({
     name: `${bucket} Pts`,
     count
   })).sort((a, b) => parseInt(a.name) - parseInt(b.name));
 
-  return (
-    <div className="p-8 max-w-[1200px] mx-auto bg-[#0a0a0f] text-white animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <header className="flex items-center gap-4 mb-12">
-        <button onClick={onBack} className="text-[#5a5a78] hover:text-white transition-colors">
-          <ChevronLeft size={24} />
-        </button>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">{exam.title} <span className="text-accent">Analytics</span></h1>
-          <p className="text-[#5a5a78] mt-1 font-mono text-sm uppercase tracking-widest">Post-Evaluation Performance Metrics</p>
+  const StatCard = ({ icon: Icon, value, label, trend }) => (
+    <div className="card card-hover p-5 flex flex-col relative overflow-hidden group cursor-default">
+      <div className="flex justify-between items-start mb-4">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0"
+          style={{ background: 'linear-gradient(135deg, #4F46E5, #7C3AED)' }}>
+          <Icon size={18} />
         </div>
+        {trend && <span className="badge badge-green text-[10px]">{trend}</span>}
+      </div>
+      <div>
+        <div className="text-3xl font-bold text-text mb-0.5 tracking-tight">{value}</div>
+        <div className="caption uppercase tracking-wider">{label}</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="page-wrapper py-10 animate-in fade-in duration-500">
+      <header className="flex items-center justify-between mb-10">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-text2 hover:bg-surface2 hover:text-text transition-colors">
+            <ChevronLeft size={20} />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-text">{exam.title}</h1>
+            <p className="text-sm text-text2 mt-1">Post-Evaluation Performance Metrics</p>
+          </div>
+        </div>
+        <button 
+          className="btn btn-outline"
+          onClick={() => window.print()}
+        >
+          <Download size={16} /> Export Report
+        </button>
       </header>
 
       {/* STATS CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-        <div className="bg-[#111118] border border-[#2a2a3a] p-6 rounded-2xl relative overflow-hidden">
-          <div className="text-[#5a5a78] mb-4"><Award size={20} /></div>
-          <div className="text-3xl font-bold text-white mb-1">{data.average_score}</div>
-          <div className="text-[10px] text-[#5a5a78] uppercase tracking-widest font-mono">Average Score</div>
-          <div className="absolute right-0 bottom-0 text-6xl opacity-5 translate-x-4 translate-y-4">🏆</div>
-        </div>
-        <div className="bg-[#111118] border border-[#2a2a3a] p-6 rounded-2xl relative overflow-hidden">
-          <div className="text-[#5a5a78] mb-4"><Users size={20} /></div>
-          <div className="text-3xl font-bold text-white mb-1">{data.total_graded}</div>
-          <div className="text-[10px] text-[#5a5a78] uppercase tracking-widest font-mono">Papers Evaluated</div>
-          <div className="absolute right-0 bottom-0 text-6xl opacity-5 translate-x-4 translate-y-4">👥</div>
-        </div>
-        <div className="bg-accent/10 border border-accent/20 p-6 rounded-2xl relative overflow-hidden">
-          <div className="text-accent mb-4"><Clock size={20} /></div>
-          <div className="text-3xl font-bold text-white mb-1">~{data.time_saved_hours}h</div>
-          <div className="text-[10px] text-accent uppercase tracking-widest font-mono">Human-Hours Saved</div>
-          <div className="absolute right-0 bottom-0 text-6xl opacity-5 translate-x-4 translate-y-4 text-accent">⚡️</div>
-        </div>
-        <div className="bg-[#111118] border border-[#2a2a3a] p-6 rounded-2xl relative overflow-hidden">
-          <div className="text-[#5a5a78] mb-4"><TrendingUp size={20} /></div>
-          <div className="text-3xl font-bold text-white mb-1">94%</div>
-          <div className="text-[10px] text-[#5a5a78] uppercase tracking-widest font-mono">VLM Confidence</div>
-          <div className="absolute right-0 bottom-0 text-6xl opacity-5 translate-x-4 translate-y-4">📈</div>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <StatCard icon={Award} value={data.average_score} label="Average Score" />
+        <StatCard icon={Users} value={data.total_graded} label="Papers Evaluated" />
+        <StatCard icon={Clock} value={`~${data.time_saved_hours}h`} label="Human-Hours Saved" trend="+82% vs Manual" />
+        <StatCard icon={TrendingUp} value="94%" label="VLM Confidence" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* SCORE DISTRIBUTION */}
-        <div className="lg:col-span-2 bg-[#111118] border border-[#2a2a3a] rounded-2xl p-8">
-          <h3 className="text-xs uppercase tracking-widest text-[#5a5a78] font-bold mb-8">Score Distribution</h3>
-          <div className="h-[300px] w-full">
+        <div className="lg:col-span-2 card !p-0 overflow-hidden">
+          <div className="px-6 py-5 border-b border-border bg-surface2/30 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text uppercase tracking-wider">Score Distribution</h3>
+          </div>
+          <div className="h-[340px] w-full p-6">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
+              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E4E4E7" />
                 <XAxis 
                   dataKey="name" 
-                  stroke="#5a5a78" 
-                  fontSize={10} 
+                  stroke="#A1A1AA" 
+                  fontSize={12} 
                   tickLine={false} 
                   axisLine={false} 
+                  dy={10}
                 />
                 <YAxis 
-                  stroke="#5a5a78" 
-                  fontSize={10} 
+                  stroke="#A1A1AA" 
+                  fontSize={12} 
                   tickLine={false} 
                   axisLine={false} 
                 />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#111118', border: '1px solid #2a2a3a', borderRadius: '8px', fontSize: '12px' }}
-                  cursor={{ fill: 'rgba(124, 106, 247, 0.05)' }}
+                  cursor={{ fill: '#F4F4F5' }}
+                  contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #E4E4E7', borderRadius: '8px', fontSize: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}
                 />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={40}>
                   {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={index === chartData.length - 1 ? '#7c6af7' : '#2a2a3a'} className="hover:fill-accent transition-colors duration-300" />
+                    <Cell key={`cell-${index}`} fill="#4F46E5" fillOpacity={0.85} />
                   ))}
                 </Bar>
               </BarChart>
@@ -99,38 +106,43 @@ export default function AnalyticsDashboard({ exam, onBack }) {
         </div>
 
         {/* INSIGHTS PANEL */}
-        <div className="bg-[#111118] border border-[#2a2a3a] rounded-2xl p-8">
-          <h3 className="text-xs uppercase tracking-widest text-[#5a5a78] font-bold mb-8">Operational Insights</h3>
-          <div className="space-y-6">
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0 italic font-bold">!</div>
-              <div>
-                <div className="text-sm font-semibold text-white mb-1">Consistency Check</div>
-                <p className="text-xs text-[#5a5a78] leading-relaxed">AI and TA scores correlated at 0.94. Distribution is normal, indicating healthy rubric alignment.</p>
-              </div>
-            </div>
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[#22c55e]/10 border border-[#22c55e]/20 flex items-center justify-center text-[#22c55e] shrink-0 font-bold">✓</div>
-              <div>
-                <div className="text-sm font-semibold text-white mb-1">Throughput Efficiency</div>
-                <p className="text-xs text-[#5a5a78] leading-relaxed">Evaluation pipeline completed 100% of items. TA review speed averaged 12s per item.</p>
-              </div>
-            </div>
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[#ef4444]/10 border border-[#ef4444]/20 flex items-center justify-center text-[#ef4444] shrink-0 font-bold">?</div>
-              <div>
-                <div className="text-sm font-semibold text-white mb-1">Flagged Anomalies</div>
-                <p className="text-xs text-[#5a5a78] leading-relaxed">3 submissions were flagged for plagiarism clusters. Manual verification recommended.</p>
-              </div>
-            </div>
+        <div className="card !p-0 overflow-hidden">
+          <div className="px-6 py-5 border-b border-border bg-surface2/30">
+            <h3 className="text-sm font-semibold text-text uppercase tracking-wider">Operational Insights</h3>
           </div>
+          <div className="p-6 space-y-6">
+            
+            <div className="flex gap-4">
+              <div className="mt-1 w-8 h-8 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                <Info size={16} />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-text mb-1">Consistency Check</div>
+                <p className="text-xs text-text2 leading-relaxed">AI and TA scores correlated at 0.94. Distribution is normal, indicating healthy rubric alignment.</p>
+              </div>
+            </div>
+            
+            <div className="flex gap-4">
+              <div className="mt-1 w-8 h-8 rounded-full bg-green-50 border border-green-100 flex items-center justify-center text-green-600 shrink-0">
+                <Info size={16} />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-text mb-1">Throughput Efficiency</div>
+                <p className="text-xs text-text2 leading-relaxed">Evaluation pipeline completed 100% of items. TA review speed averaged 12s per item.</p>
+              </div>
+            </div>
+            
+            <div className="flex gap-4">
+              <div className="mt-1 w-8 h-8 rounded-full bg-red-50 border border-red-100 flex items-center justify-center text-red-600 shrink-0">
+                <Info size={16} />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-text mb-1">Flagged Anomalies</div>
+                <p className="text-xs text-text2 leading-relaxed">3 submissions were flagged for plagiarism clusters. Manual verification recommended.</p>
+              </div>
+            </div>
 
-          <button 
-            className="w-full mt-10 bg-[#2a2a3a] hover:bg-white hover:text-black text-white py-3 rounded-xl text-xs font-bold transition-all"
-            onClick={() => window.print()}
-          >
-            Export PDF Report
-          </button>
+          </div>
         </div>
       </div>
     </div>

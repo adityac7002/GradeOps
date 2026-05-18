@@ -1,145 +1,183 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Spinner } from '../ui';
+import { Mail, Lock, Loader2, ArrowRight, Cpu, Zap, Shield, BarChart3 } from 'lucide-react';
 
 export default function Login() {
   const { login } = useAuth();
-  const [form, setForm] = useState({ email: '', password: '' });
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-
-  const handleSubmit = async e => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setError(''); setLoading(true);
+    setLoading(true);
+    setError('');
     try {
-      await login(form.email, form.password);
+      await login(email, password);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Invalid credentials');
     } finally {
       setLoading(false);
     }
   };
 
-  const quickLogin = (email, pass) => {
-    setForm({ email, password: pass });
-  };
+  const features = [
+    { icon: Zap,       label: 'AI-powered grading',    sub: 'Gemini & Llama 3.2 vision' },
+    { icon: Shield,    label: 'Plagiarism detection',  sub: 'TF-IDF similarity scoring' },
+    { icon: BarChart3, label: 'Analytics & insights',  sub: 'Score distributions, trends' },
+    { icon: Cpu,       label: 'Human-in-the-loop',     sub: 'TA override & review panel' },
+  ];
 
   return (
-    <div className="min-h-screen flex bg-[#0a0a0f] font-sans selection:bg-accent-glow">
-      
-      {/* LEFT PANE - MARKETING / BRANDING */}
-      <div className="hidden lg:flex w-1/2 bg-[#111118] border-r border-[#2a2a3a] flex-col justify-between p-12 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-          <div className="absolute -top-[20%] -left-[10%] w-[70%] h-[70%] rounded-full bg-accent/10 blur-[120px] mix-blend-screen" />
-          <div className="absolute top-[40%] -right-[20%] w-[60%] h-[60%] rounded-full bg-[#22c55e]/5 blur-[120px] mix-blend-screen" />
-          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTTAgNDBoNDBWMEgwem0zOS0zOUgxVjM5aDM4eiIgZmlsbD0iIzFBMUEyNSIgZmlsbC1vcGFjaXR5PSIwLjUiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] opacity-20 mask-image:linear-gradient(to_bottom,white,transparent)" />
-        </div>
+    <div className="min-h-screen flex" style={{ background: 'var(--color-background)' }}>
 
+      {/* ── Left branding panel ─────────────────────────────────────── */}
+      <div className="hidden lg:flex lg:w-[460px] xl:w-[520px] flex-col justify-between p-10 relative overflow-hidden"
+        style={{
+          background: 'linear-gradient(155deg, #0D0F1E 0%, #11133A 40%, #1A0E2E 100%)',
+          borderRight: '1px solid rgba(99,102,241,0.15)'
+        }}>
+
+        {/* Subtle mesh grid */}
+        <div className="absolute inset-0 opacity-[0.04]"
+          style={{
+            backgroundImage: 'linear-gradient(rgba(99,102,241,.6) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,.6) 1px, transparent 1px)',
+            backgroundSize: '48px 48px'
+          }} />
+
+        {/* Glow orbs */}
+        <div className="absolute -top-32 -left-32 w-64 h-64 rounded-full opacity-20"
+          style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.6) 0%, transparent 70%)' }} />
+        <div className="absolute bottom-0 right-0 w-96 h-96 rounded-full opacity-10"
+          style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.8) 0%, transparent 70%)' }} />
+
+        {/* Top section */}
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-16">
-            <div className="w-10 h-10 bg-accent rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-[0_0_20px_rgba(124,106,247,0.5)]">G</div>
-            <span className="text-white font-bold text-2xl tracking-tight">GradeOps<span className="text-accent">.</span></span>
+          <div className="flex items-center gap-3 mb-14">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center border"
+              style={{ background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.3)' }}>
+              <Cpu size={18} style={{ color: '#A5B4FC' }} />
+            </div>
+            <span className="text-white font-semibold text-lg tracking-tight">GradeOps</span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold"
+              style={{ background: 'rgba(99,102,241,0.2)', color: '#A5B4FC', border: '1px solid rgba(99,102,241,0.35)' }}>
+              AI
+            </span>
           </div>
-          
-          <h1 className="text-5xl font-bold text-white leading-[1.1] tracking-tight mb-6">
-            Institutional-grade <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent to-[#a78bfa]">AI evaluation.</span>
-          </h1>
-          <p className="text-[#9898b8] text-lg max-w-md leading-relaxed mb-12">
-            Accelerate grading workflows with precision Vision AI, human-in-the-loop oversight, and structured rubric pipelines.
-          </p>
 
-          <div className="flex flex-col gap-8">
-            <div className="flex gap-4 items-start">
-              <div className="w-8 h-8 rounded bg-[#1a1a25] border border-[#2a2a3a] flex items-center justify-center text-accent shrink-0 mt-1">🤖</div>
-              <div>
-                <h3 className="text-white font-semibold mb-1">AI-Powered Grading Pipeline</h3>
-                <p className="text-[#5a5a78] text-sm leading-relaxed">Automate evaluation using Gemini 2.5 Flash Vision models directly on scanned images.</p>
-              </div>
-            </div>
-            <div className="flex gap-4 items-start">
-              <div className="w-8 h-8 rounded bg-[#1a1a25] border border-[#2a2a3a] flex items-center justify-center text-accent shrink-0 mt-1">👁</div>
-              <div>
-                <h3 className="text-white font-semibold mb-1">Human-in-the-Loop Review</h3>
-                <p className="text-[#5a5a78] text-sm leading-relaxed">Keyboard-first TA dashboard for high-speed overrides, approvals, and confidence checks.</p>
-              </div>
-            </div>
-          </div>
+          <h2 className="text-[2rem] font-bold text-white leading-tight mb-4 tracking-tight">
+            Academic evaluation,<br />
+            <span style={{ background: 'linear-gradient(135deg, #A5B4FC, #C4B5FD)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              redefined.
+            </span>
+          </h2>
+          <p style={{ color: '#8B91B0' }} className="text-sm leading-relaxed max-w-xs">
+            AI-assisted handwritten exam grading platform built for universities. Trusted by faculty, loved by TAs.
+          </p>
         </div>
 
-        <div className="relative z-10 flex items-center justify-between text-xs text-[#5a5a78] font-mono">
-          <span>© 2026 GradeOps Infrastructure</span>
-          <span>v2.0.0-hackathon</span>
+        {/* Feature list */}
+        <div className="relative z-10 space-y-2.5">
+          {features.map(({ icon: Icon, label, sub }) => (
+            <div key={label} className="flex items-center gap-3.5 p-3.5 rounded-xl"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.25)' }}>
+                <Icon size={14} style={{ color: '#A5B4FC' }} />
+              </div>
+              <div>
+                <div className="text-sm font-medium text-white">{label}</div>
+                <div className="text-xs" style={{ color: '#525870' }}>{sub}</div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* RIGHT PANE - AUTH FORM */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 relative">
-        <div className="w-full max-w-md">
-          <div className="mb-10 text-center lg:text-left">
-            <h2 className="text-3xl font-bold text-white tracking-tight mb-2">Welcome back</h2>
-            <p className="text-[#9898b8]">Enter your institutional credentials to access your dashboard.</p>
+      {/* ── Right form panel ─────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col items-center justify-center p-8"
+        style={{ background: 'var(--color-background)' }}>
+        <div className="w-full max-w-[380px]">
+
+          {/* Mobile logo */}
+          <div className="lg:hidden flex items-center gap-2 mb-8">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white"
+              style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)' }}>
+              <Cpu size={16} />
+            </div>
+            <span className="font-semibold text-lg" style={{ color: 'var(--color-text)' }}>GradeOps</span>
           </div>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-[#9898b8] mb-2 font-semibold">Institutional Email</label>
-              <input 
-                className="w-full bg-[#111118] border border-[#2a2a3a] rounded-md px-4 py-3 text-white text-sm focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all placeholder-[#5a5a78]" 
-                type="email" placeholder="you@university.edu" value={form.email} onChange={set('email')} required 
-              />
-            </div>
+          <h1 className="text-2xl font-bold tracking-tight mb-1" style={{ color: 'var(--color-text)' }}>Sign in</h1>
+          <p className="text-sm mb-8" style={{ color: 'var(--color-text2)' }}>Enter your credentials to access the platform.</p>
 
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-[#9898b8] mb-2 font-semibold">Password</label>
-              <input 
-                className="w-full bg-[#111118] border border-[#2a2a3a] rounded-md px-4 py-3 text-white text-sm focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all placeholder-[#5a5a78] tracking-widest" 
-                type="password" placeholder="••••••••" value={form.password} onChange={set('password')} required 
-              />
+          {error && (
+            <div className="mb-5 p-3.5 rounded-lg text-sm flex items-center gap-2 animate-in fade-in duration-200"
+              style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#FCA5A5' }}>
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#EF4444' }} />
+              {error}
             </div>
+          )}
 
-            {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-500 text-sm rounded-md font-mono flex items-start gap-2">
-                <span className="text-red-500 mt-0.5">🚨</span> {error}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="label block mb-1.5">Email address</label>
+              <div className="relative">
+                <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text3)' }} />
+                <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
+                  className="form-input pl-9" placeholder="you@university.edu" autoComplete="email" />
               </div>
-            )}
-
-            <button 
-              type="submit" 
-              className="mt-4 w-full bg-white text-black font-semibold py-3 rounded-md hover:bg-gray-200 transition-all shadow-[0_0_20px_rgba(255,255,255,0.1)] flex justify-center items-center h-[48px]" 
-              disabled={loading}
-            >
-              {loading ? <Spinner /> : 'Authenticate'}
+            </div>
+            <div>
+              <label className="label block mb-1.5">Password</label>
+              <div className="relative">
+                <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text3)' }} />
+                <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
+                  className="form-input pl-9" placeholder="••••••••" autoComplete="current-password" />
+              </div>
+            </div>
+            <button type="submit" disabled={loading} className="btn btn-primary btn-lg w-full mt-2">
+              {loading
+                ? <Loader2 size={16} className="animate-spin" />
+                : <><span>Sign in</span><ArrowRight size={15} /></>
+              }
             </button>
           </form>
 
-          {/* QUICK ACCESS PANEL FOR DEMO */}
-          <div className="mt-12 p-6 bg-[#111118] border border-[#2a2a3a] rounded-xl">
-            <h4 className="text-xs uppercase tracking-widest text-accent font-mono mb-4">Quick Access (Demo Seed)</h4>
-            <div className="flex flex-col gap-3">
-              <button 
-                onClick={() => quickLogin('admin@gradeops.com', 'admin123')}
-                className="flex items-center justify-between p-3 bg-[#1a1a25] border border-[#2a2a3a] rounded-lg hover:border-accent transition-all group"
+          <div className="flex items-center gap-3 my-7">
+            <div className="h-px flex-1" style={{ background: 'var(--color-border)' }} />
+            <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text3)' }}>Demo access</span>
+            <div className="h-px flex-1" style={{ background: 'var(--color-border)' }} />
+          </div>
+
+          <div className="space-y-2">
+            {[
+              { email: 'admin@gradeops.com', password: 'admin123', role: 'Instructor', initial: 'I', color: '#6366F1' },
+              { email: 'ta@gradeops.com',    password: 'ta123',    role: 'Teaching Assistant', initial: 'T', color: '#8B5CF6' },
+            ].map(({ email: e, password: p, role, initial, color }) => (
+              <button key={e} type="button" onClick={() => { setEmail(e); setPassword(p); }}
+                className="w-full p-3 rounded-xl flex items-center justify-between group transition-all"
+                style={{
+                  background: 'var(--color-surface)',
+                  border: '1px solid var(--color-border)',
+                }}
+                onMouseEnter={el => { el.currentTarget.style.borderColor = 'var(--color-border2)'; el.currentTarget.style.background = 'var(--color-surface2)'; }}
+                onMouseLeave={el => { el.currentTarget.style.borderColor = 'var(--color-border)'; el.currentTarget.style.background = 'var(--color-surface)'; }}
               >
-                <div className="text-left">
-                  <div className="text-sm font-medium text-white">Instructor Access</div>
-                  <div className="text-[10px] text-[#5a5a78] font-mono mt-0.5">admin@gradeops.com / admin123</div>
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold"
+                    style={{ background: color }}>
+                    {initial}
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{role}</div>
+                    <div className="text-xs font-mono" style={{ color: 'var(--color-text3)' }}>{e}</div>
+                  </div>
                 </div>
-                <span className="text-lg opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+                <ArrowRight size={14} style={{ color: 'var(--color-text3)' }} />
               </button>
-              <button 
-                onClick={() => quickLogin('ta@gradeops.com', 'ta123')}
-                className="flex items-center justify-between p-3 bg-[#1a1a25] border border-[#2a2a3a] rounded-lg hover:border-accent transition-all group"
-              >
-                <div className="text-left">
-                  <div className="text-sm font-medium text-white">TA Reviewer Access</div>
-                  <div className="text-[10px] text-[#5a5a78] font-mono mt-0.5">ta@gradeops.com / ta123</div>
-                </div>
-                <span className="text-lg opacity-0 group-hover:opacity-100 transition-opacity">→</span>
-              </button>
-            </div>
+            ))}
           </div>
         </div>
       </div>

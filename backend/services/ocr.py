@@ -230,7 +230,7 @@ def run_ocr(image_path: str) -> str:
     """
     Transcribe all handwritten text from an image file.
     Uses Qwen2-VL-2B by default (best for complex exam pages),
-    falls back to TrOCR if Qwen is not available.
+    falls back to TrOCR if Qwen is not available or out of memory.
     """
     image = Image.open(image_path).convert("RGB")
 
@@ -242,6 +242,14 @@ def run_ocr(image_path: str) -> str:
         return _qwen_ocr(image)
     except Exception as e:
         logger.warning("[OCR] Qwen2-VL failed (%s), falling back to TrOCR.", e)
+        
+        # FIX: Explicitly clear the GPU cache before loading the fallback
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+            
         try:
             return _trocr_ocr(image)
         except Exception as e2:

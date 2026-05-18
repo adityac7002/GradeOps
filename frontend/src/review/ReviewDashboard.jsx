@@ -117,7 +117,7 @@ export default function ReviewDashboard({ exam, onBack }) {
              <TransformWrapper initialScale={1} minScale={0.5} maxScale={4} centerOnInit>
                <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
                  <img 
-                   src={`http://localhost:8000/${currentAnswer.crop_path}`} 
+                   src={`${import.meta.env.VITE_API_URL || ''}/${currentAnswer.crop_path}`} 
                    alt="Student Answer Crop" 
                    className="object-contain shadow-md rounded border border-border/50 bg-white"
                    style={{ maxHeight: '80vh', maxWidth: '90vw' }}
